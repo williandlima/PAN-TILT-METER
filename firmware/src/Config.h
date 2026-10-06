@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.11";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10611;
+constexpr char FIRMWARE_VERSION[] = "1.6.12";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10612;
 
 // ============================================================================
 // Parâmetros Modbus RTU — devem bater com python-app/data_source/modbus_source.py
@@ -170,13 +170,22 @@ constexpr float ANGLE_MAX_DEG = 60.0f;
 // novos, todos convertidos para bruto), o fator medido é 0,9291 em vez de
 // 0,9408 — a extrapolação para além de 8,6° não era segura com tão poucos
 // pontos. TILT_SCALE_CORRECTION_POS passa de 1,063 para 1,076: resíduo cai
-// para -0,05°/+0,03° em toda a faixa até 21,5° (era até -0,30°). O lado
-// negativo continua com só os 9 pontos originais (até -8,6°) — mais pontos
-// desse lado, numa faixa maior, teriam o mesmo benefício. Refazer esta
-// calibração (os dois lados, com mais pontos se possível) se o MPU6050
-// físico for substituído.
+// para -0,05°/+0,03° em toda a faixa até 21,5° (era até -0,30°).
+//
+// Firmware 1.6.12: mais uma rodada de bancada (0° a 8,03°, 15 pontos) ainda
+// mostrava viés residual (-0,05° em média, até -0,14°) com o fator 1,076.
+// Juntando as 3 rodadas (9 + 15 + 15 = 39 pontos positivos, 0° a 21,5°,
+// tudo convertido para bruto): o fator medido é 0,9188. Testado um ajuste
+// com deslocamento fixo além da escala — o termo de offset saiu em só
+// 0,007°, confirmando que é escala pura, não um offset escondido.
+// TILT_SCALE_CORRECTION_POS passa de 1,076 para 1,088: desvio-padrão do
+// resíduo cai de 0,101° para 0,084° e o viés médio zera. O lado negativo
+// continua com só os 9 pontos originais (até -8,6°) — mais pontos desse
+// lado, numa faixa maior, teriam o mesmo benefício que o positivo já teve
+// duas vezes. Refazer esta calibração (os dois lados, com mais pontos se
+// possível) se o MPU6050 físico for substituído.
 constexpr float TILT_SCALE_CORRECTION_NEG = 1.042f;  // 1 / 0,9593
-constexpr float TILT_SCALE_CORRECTION_POS = 1.076f;  // 1 / 0,9291
+constexpr float TILT_SCALE_CORRECTION_POS = 1.088f;  // 1 / 0,9188
 
 // ============================================================================
 // Filtro da leitura contínua (só do ângulo "normal" — o Modo Vibração NÃO
