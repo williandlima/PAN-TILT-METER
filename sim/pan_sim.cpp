@@ -4,6 +4,7 @@
 #include <random>
 #include <cmath>
 #include "Arduino.h"
+#include "Config.h"
 #include "Mpu6050.h"
 #include "PanSensor.h"
 
@@ -15,13 +16,6 @@ static double g_tiltDeg = 0, g_tiltRateDps = 0, g_panRateDps = 0;
 static double BGX = 1.5, BGY = 3.0, BGZ = -2.0;  // bias de fábrica do giro (°/s), corpo
 static std::mt19937 rng(42);
 static std::normal_distribution<double> noise(0.0, 0.05);
-// O giroscópio simulado tem a mesma sensibilidade ~5% abaixo do nominal
-// medida nesta unidade (ver PAN_SCALE_CORRECTION em firmware/src/Config.h),
-// para o simulador continuar representando um sensor real e não um
-// perfeito — a correção do firmware deve cancelar isto e devolver o valor
-// comandado, senão os cenários abaixo passariam por acidente com qualquer
-// PAN_SCALE_CORRECTION errado.
-static const double PAN_SENSOR_SCALE = 1.0 / 1.051;
 // Leitura espúria isolada (ruído no I2C): a cada g_spikeEveryMs, uma amostra
 // de gz vem com g_spikeDps. 0 = desligado.
 static uint32_t g_spikeEveryMs = 0, g_readCount = 0;
@@ -34,6 +28,9 @@ bool Mpu6050::readAccelG(float &ax, float &ay, float &az) {
 bool Mpu6050::readMotion(float &ax, float &ay, float &az, float &gx, float &gy, float &gz) {
     readAccelG(ax, ay, az);
     double t = g_tiltDeg * M_PI / 180;
+    // Sensibilidade do giroscópio ~3% abaixo do nominal (ver PAN_SCALE_CORRECTION
+    // em firmware/src/Config.h, calibrado em bancada na 1.6.9).
+    static const double PAN_SENSOR_SCALE = 1.0 / PAN_SCALE_CORRECTION;
     gx = g_tiltRateDps + BGX + noise(rng);
     gy = -g_panRateDps * PAN_SENSOR_SCALE * sin(t) + BGY + noise(rng);
     gz =  g_panRateDps * PAN_SENSOR_SCALE * cos(t) + BGZ + noise(rng);

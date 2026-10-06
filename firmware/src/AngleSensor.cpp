@@ -103,16 +103,34 @@ void AngleSensor::update() {
     _peaks.push(toReported(_measuredRawDeg));
 }
 
+namespace {
+// Fator de escala da inclinação, conforme o lado (ver TILT_SCALE_CORRECTION_*
+// em Config.h) — a correção medida em bancada não é simétrica entre
+// inclinação positiva e negativa. A assimetria é uma característica física
+// do sensor/montagem (o atan2 muda de comportamento perto do zero MECÂNICO,
+// não perto de onde o usuário decide calibrar), então o lado é escolhido
+// pelo sinal do ângulo bruto (rawDeg, absoluto), e NÃO pelo sinal do
+// deslocamento em relação à calibração — calibrar longe do zero mecânico
+// não pode fazer a leitura escolher o lado errado.
+float tiltScaleFor(float rawDeg) {
+    return rawDeg < 0.0f ? TILT_SCALE_CORRECTION_NEG : TILT_SCALE_CORRECTION_POS;
+}
+// Ângulo absoluto já corrigido (antes de subtrair a calibração).
+float correctedAbsDeg(float rawDeg) {
+    return rawDeg * tiltScaleFor(rawDeg);
+}
+}  // namespace
+
 float AngleSensor::readRelativeAngleDeg() {
     float rawDeg;
     if (!readRawAngleDeg(rawDeg)) {
         rawDeg = _lastRawDeg;  // amostra perdida: repete a última válida
     }
-    return rawDeg - _offsetDeg;
+    return correctedAbsDeg(rawDeg) - _offsetDeg;
 }
 
 float AngleSensor::toReported(float rawDeg) const {
-    float angle = rawDeg - _offsetDeg;
+    float angle = correctedAbsDeg(rawDeg) - _offsetDeg;
     if (angle < ANGLE_MIN_DEG) angle = ANGLE_MIN_DEG;
     if (angle > ANGLE_MAX_DEG) angle = ANGLE_MAX_DEG;
     return angle;
@@ -131,7 +149,10 @@ float AngleSensor::maxAngleDeg() {
 }
 
 void AngleSensor::calibrate() {
-    _offsetDeg = _filteredRawDeg;
+    // _offsetDeg guarda o ângulo JÁ corrigido (não o bruto): assim toReported()
+    // só precisa subtrair, e o lado (NEG/POS) de cada leitura continua sendo
+    // decidido pelo sinal do ângulo bruto absoluto, nunca pelo da calibração.
+    _offsetDeg = correctedAbsDeg(_filteredRawDeg);
 
     // Os extremos guardados são relativos ao zero antigo — mantê-los depois de
     // mover o zero reportaria mínimos e máximos que nunca aconteceram.

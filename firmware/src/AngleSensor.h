@@ -27,6 +27,13 @@
 // - readRelativeAngleDeg(): VIBRAÇÃO. Amostra instantânea, sem filtro nenhum —
 //   ali a variação de frações de grau é justamente o que se quer medir, então
 //   filtrar destruiria o dado.
+//
+// Os três caminhos aplicam TILT_SCALE_CORRECTION_NEG/_POS (Config.h) sobre o
+// valor JÁ relativo à calibração — calibrado em bancada com um inclinômetro
+// de referência (ver o comentário das constantes). Correção proporcional ao
+// deslocamento em relação ao zero, mesmo raciocínio do pan, com um fator
+// diferente para cada lado (a assimetria medida entre inclinação positiva e
+// negativa não é ruído — ver Config.h).
 class AngleSensor {
 public:
     // O Mpu6050 é compartilhado (por referência) com o PanSensor: é o mesmo
@@ -68,6 +75,12 @@ public:
 
 private:
     Mpu6050 &_mpu;
+    // Ângulo JÁ CORRIGIDO (não bruto) no instante da calibração — ver
+    // AngleSensor::calibrate()/correctedAbsDeg() no .cpp. Guardar o valor
+    // corrigido, e não o bruto, é o que permite escolher o lado da correção
+    // (NEG/POS) pelo sinal do ângulo bruto absoluto em vez do sinal relativo
+    // à calibração — calibrar fora do zero mecânico não muda qual lado é
+    // usado numa leitura.
     float _offsetDeg = 0.0f;
 
     // Estado do filtro 1-euro (todos em ângulo absoluto, antes do offset):
@@ -92,8 +105,9 @@ private:
     // leitura I2C falhar (sensor desconectado, mau contato).
     bool readRawAngleDeg(float &angleDeg);
 
-    // Aplica o offset de calibração e o clamp de faixa — a forma em que o
-    // ângulo sai deste sensor, seja como leitura corrente ou como extremo.
+    // Aplica o offset de calibração, o fator de escala — diferente para cada
+    // lado (TILT_SCALE_CORRECTION_NEG/_POS) — e o clamp de faixa: a forma em
+    // que o ângulo sai deste sensor, seja como leitura corrente ou extremo.
     float toReported(float rawDeg) const;
 
     // Coeficiente de uma média móvel exponencial de 1 polo para a frequência

@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.7";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10607;
+constexpr char FIRMWARE_VERSION[] = "1.6.12";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10612;
 
 // ============================================================================
 // Parâmetros Modbus RTU — devem bater com python-app/data_source/modbus_source.py
@@ -136,6 +136,56 @@ constexpr uint32_t BLE_VIBRATION_CHUNK_INTERVAL_MS = 5;
 constexpr float ANGLE_SCALE = 100.0f;  // valor no protocolo = ângulo * ANGLE_SCALE
 constexpr float ANGLE_MIN_DEG = -60.0f;
 constexpr float ANGLE_MAX_DEG = 60.0f;
+
+// Correção do fator de escala da inclinação. Resolvido pelo atan2 entre os
+// dois eixos do acelerômetro (sem singularidade nem necessidade de bias,
+// diferente do giroscópio do pan), o erro residual observado em bancada
+// ainda assim não era ruído: era uma escala sistemática, proporcional ao
+// deslocamento em relação à calibração — mesma assinatura do erro do pan,
+// mas aqui provavelmente por um descasamento de sensibilidade entre os
+// dois eixos do acelerômetro usados no atan2 (Y e Z), e não por bias.
+//
+// Valor medido nesta unidade contra o inclinômetro de referência Mitutoyo
+// PRO3600 (nº F4020023), 24 pontos entre -8,6° e +7,7° de inclinação
+// (firmware 1.6.8): ajuste por escala pura (sem offset) = 0,951 x
+// referência — desvio cai de 0,255° (sem correção) para 0,073° (com uma
+// correção única para os dois lados).
+//
+// Firmware 1.6.10: o erro NÃO é simétrico entre inclinação positiva e
+// negativa — separando os mesmos 24 pontos por sinal, o fator medido é
+// 0,9593 do lado negativo e 0,9408 do lado positivo (uma correção única
+// deixava um viés residual de -0,047°/-0,076° em cada lado). Assimetria
+// assim não vem de um descasamento Y/Z puro (que seria simétrico, por
+// atan2 ser função ímpar) — mais provável é um pequeno desalinhamento de
+// montagem do sensor, ou o zero de calibração não coincidir exatamente com
+// o zero mecânico. Corrigido com dois fatores, aplicados conforme o sinal
+// do ÂNGULO BRUTO ABSOLUTO — o zero mecânico do sensor, e não o ponto de
+// calibração (ver correctedAbsDeg() em AngleSensor.cpp: calibrar longe do
+// zero mecânico não pode fazer a leitura escolher o lado errado).
+//
+// Firmware 1.6.11: o lado positivo foi recalibrado com 15 pontos novos
+// (0,48° a 21,5°, complementando os 9 originais de até 6,99°) — o fator de
+// 1,063 vinha ficando cada vez mais curto acima de uns 4°, chegando a
+// -0,30° de erro em 21,5°. Com os 24 pontos positivos juntos (originais +
+// novos, todos convertidos para bruto), o fator medido é 0,9291 em vez de
+// 0,9408 — a extrapolação para além de 8,6° não era segura com tão poucos
+// pontos. TILT_SCALE_CORRECTION_POS passa de 1,063 para 1,076: resíduo cai
+// para -0,05°/+0,03° em toda a faixa até 21,5° (era até -0,30°).
+//
+// Firmware 1.6.12: mais uma rodada de bancada (0° a 8,03°, 15 pontos) ainda
+// mostrava viés residual (-0,05° em média, até -0,14°) com o fator 1,076.
+// Juntando as 3 rodadas (9 + 15 + 15 = 39 pontos positivos, 0° a 21,5°,
+// tudo convertido para bruto): o fator medido é 0,9188. Testado um ajuste
+// com deslocamento fixo além da escala — o termo de offset saiu em só
+// 0,007°, confirmando que é escala pura, não um offset escondido.
+// TILT_SCALE_CORRECTION_POS passa de 1,076 para 1,088: desvio-padrão do
+// resíduo cai de 0,101° para 0,084° e o viés médio zera. O lado negativo
+// continua com só os 9 pontos originais (até -8,6°) — mais pontos desse
+// lado, numa faixa maior, teriam o mesmo benefício que o positivo já teve
+// duas vezes. Refazer esta calibração (os dois lados, com mais pontos se
+// possível) se o MPU6050 físico for substituído.
+constexpr float TILT_SCALE_CORRECTION_NEG = 1.042f;  // 1 / 0,9593
+constexpr float TILT_SCALE_CORRECTION_POS = 1.088f;  // 1 / 0,9188
 
 // ============================================================================
 // Filtro da leitura contínua (só do ângulo "normal" — o Modo Vibração NÃO
@@ -293,13 +343,20 @@ constexpr float PAN_SPIKE_REPORT_DPS = 30.0f;
 // com o número de movimentos. Calibração de bancada: girar o eixo entre duas
 // posições de separação angular conhecida e usar (ângulo real / integrado).
 //
-// Valor medido nesta unidade (firmware 1.6.7): mesa giratória Mitutoyo
-// AVB007451 (código 517-165) como referência, 24 pontos entre -8,6° e
-// +7,7°. Ajuste por escala pura (sem offset) nos dados: leitura = 0,951 x
-// referência — desvio cai de 0,255° (sem correção) para 0,073° (com ela).
-// PAN_SCALE_CORRECTION = 1/0,951. Refazer esta calibração se o MPU6050
-// físico for substituído.
-constexpr float PAN_SCALE_CORRECTION = 1.051f;
+// Calibração PRELIMINAR (firmware 1.6.9), com só 2 pontos, contra mesa
+// giratória/goniômetro com escala angular: alvo 8,00° -> lido 7,75°; alvo
+// 9,00° -> lido 8,75° (erro crescendo com o deslocamento — assinatura de
+// escala, não de offset — e batendo com a tolerância de fábrica do giro).
+// Ajuste por escala pura: leitura = 0,9707 x referência (b = Σdr/Σr²).
+// PAN_SCALE_CORRECTION = 1/0,9707 ≈ 1,030. Com a correção, o resíduo nos
+// dois pontos cai para ±0,02° (de ±0,25° sem ela).
+//
+// Diferente do TILT_SCALE_CORRECTION (24 pontos contra um inclinômetro
+// certificado ±0,02°), isto vem de só 2 pontos contra uma mesa/goniômetro de
+// precisão não quantificada aqui — refinar com mais pontos (e idealmente
+// mais afastados de zero, ex.: 45°/90°) quando possível, e sempre que o
+// MPU6050 físico desta unidade for substituído.
+constexpr float PAN_SCALE_CORRECTION = 1.030f;
 
 // Teto para o dt de uma única integração. Protege contra um loop que atrasou
 // muito (ou millis() dando a volta) virar um salto grande no ângulo. Não pode
