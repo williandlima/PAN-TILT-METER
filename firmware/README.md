@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.12`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.13`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -215,7 +215,7 @@ degraus de 0,25° com histerese (evita alternar entre dois degraus quando o
 valor fica na fronteira). Isso é só apresentação: histórico, mín/máx e
 relatórios continuam usando o ângulo bruto.
 
-### Fator de escala (`TILT_SCALE_CORRECTION_NEG`/`_POS`, v1.6.8/1.6.10/1.6.11/1.6.12)
+### Fator de escala (`TILT_SCALE_CORRECTION_NEG`/`_POS`, v1.6.8/1.6.10/1.6.11/1.6.12/1.6.13)
 
 Resolvido pelo `atan2` entre os dois eixos do acelerômetro (sem singularidade
 nem necessidade de bias, diferente do giroscópio do pan), o tilt não deveria
@@ -252,19 +252,32 @@ medido é 0,9291 (era 0,9408 só com os 9 originais); `TILT_SCALE_CORRECTION_POS
 passou para `1,076`, e o resíduo caiu para entre −0,05° e +0,03° na faixa
 testada até ali.
 
-**Recalibrado outra vez na 1.6.12** com mais 15 pontos (0° a 8,03°): mesmo
-com o fator `1,076`, ainda sobrava um viés de −0,05° em média (até −0,14°).
-Juntando as três rodadas (9 + 15 + 15 = 39 pontos positivos, 0° a 21,5°,
-tudo convertido para a base bruta do sensor), o fator medido é 0,9188.
-Testado também um ajuste com deslocamento fixo além da escala — saiu em só
-0,007°, confirmando que é escala pura, sem offset escondido.
-`TILT_SCALE_CORRECTION_POS` passa para **1,088**: desvio-padrão do resíduo
-cai de 0,101° para 0,084° e o viés médio zera. O lado negativo
-(`TILT_SCALE_CORRECTION_NEG = 1,042`) segue com só os 9 pontos originais
-(até −8,6°) — sujeito ao mesmo risco de ficar curto fora dessa faixa (como
-o positivo já mostrou, duas vezes); mais pontos desse lado, numa faixa
-maior, teriam o mesmo benefício. Refazer toda esta calibração se o MPU6050
-físico desta unidade for substituído.
+**1.6.12 (REVERTIDO na 1.6.13):** uma rodada extra de bancada (0° a 8,03°)
+parecia mostrar viés crescente com o fator `1,076`, e o fator foi para
+`1,088` a partir disso. O cálculo estava errado: a placa usada nas duas
+últimas rodadas de bancada (0,48° a 21,5° e 0° a 8,03°) nunca tinha sido
+regravada com a 1.6.10/1.6.11 — continuava em `1.6.8`, com a correção
+única de `1,051`. As leituras já vinham com `1,051` aplicado, e o cálculo
+as dividia por `1,076` para achar o valor bruto do sensor — dividindo pelo
+fator errado, a conversão saía errada, e o ajuste seguinte (`1,088`)
+herdou esse erro.
+
+**Recalibrado corretamente na 1.6.13**, com as mesmas três rodadas (9 + 15
++ 15 = 39 pontos positivos, 0° a 21,5°), convertendo as duas últimas para
+bruto com o fator que a placa de fato tinha (`1,051`): o fator medido é
+`0,9383`. `TILT_SCALE_CORRECTION_POS` volta para **1,066** — desvio-padrão
+do resíduo cai para `0,062°` e viés médio para `−0,008°` (o melhor
+resultado desde o início; `1,088` dava desvio `0,123°`). A lição prática:
+ao reaproveitar uma leitura já corrigida pelo firmware para recalibrar, é
+preciso confirmar a versão REALMENTE gravada na placa (characteristic/
+registrador de versão — o botão "Testar conexão" dos apps mostra isso),
+não assumir pela palavra de quem fez o teste.
+
+O lado negativo (`TILT_SCALE_CORRECTION_NEG = 1,042`) segue com só os 9
+pontos originais (até −8,6°), colhidos sem nenhuma correção de firmware —
+sujeito ao mesmo risco de ficar curto fora dessa faixa; mais pontos desse
+lado, numa faixa maior, teriam o mesmo benefício. Refazer toda esta
+calibração se o MPU6050 físico desta unidade for substituído.
 
 ## Azimute (pan) pelo giroscópio (v1.2.0)
 

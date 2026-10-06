@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.12";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10612;
+constexpr char FIRMWARE_VERSION[] = "1.6.13";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10613;
 
 // ============================================================================
 // Parâmetros Modbus RTU — devem bater com python-app/data_source/modbus_source.py
@@ -172,20 +172,35 @@ constexpr float ANGLE_MAX_DEG = 60.0f;
 // pontos. TILT_SCALE_CORRECTION_POS passa de 1,063 para 1,076: resíduo cai
 // para -0,05°/+0,03° em toda a faixa até 21,5° (era até -0,30°).
 //
-// Firmware 1.6.12: mais uma rodada de bancada (0° a 8,03°, 15 pontos) ainda
-// mostrava viés residual (-0,05° em média, até -0,14°) com o fator 1,076.
-// Juntando as 3 rodadas (9 + 15 + 15 = 39 pontos positivos, 0° a 21,5°,
-// tudo convertido para bruto): o fator medido é 0,9188. Testado um ajuste
-// com deslocamento fixo além da escala — o termo de offset saiu em só
-// 0,007°, confirmando que é escala pura, não um offset escondido.
-// TILT_SCALE_CORRECTION_POS passa de 1,076 para 1,088: desvio-padrão do
-// resíduo cai de 0,101° para 0,084° e o viés médio zera. O lado negativo
-// continua com só os 9 pontos originais (até -8,6°) — mais pontos desse
-// lado, numa faixa maior, teriam o mesmo benefício que o positivo já teve
-// duas vezes. Refazer esta calibração (os dois lados, com mais pontos se
-// possível) se o MPU6050 físico for substituído.
+// Firmware 1.6.12 (REVERTIDO na 1.6.13, ver abaixo): mais uma rodada de
+// bancada (0° a 8,03°, 15 pontos) parecia mostrar viés residual com o fator
+// 1,076 — crescendo com o ângulo, até -0,14°. TILT_SCALE_CORRECTION_POS foi
+// para 1,088 a partir disso. Esse cálculo estava ERRADO: a placa usada
+// nessa rodada (e na anterior, de 0,48° a 21,5°) nunca tinha sido regravada
+// com o 1.6.11/1.6.10 — ainda estava em 1.6.8, com a correção única de
+// 1,051 (não 1,076). Os valores lidos já vinham com 1,051 aplicado, e eu
+// os dividia por 1,076 pra "desfazer" e achar o bruto — dividindo pelo
+// fator errado, a conversão para bruto saía errada, e o ajuste seguinte
+// (1,088) herdava esse erro.
+//
+// Firmware 1.6.13: mesmas 3 rodadas (9 + 15 + 15 = 39 pontos positivos,
+// 0° a 21,5°), agora convertendo as rodadas 2 e 3 para bruto dividindo pelo
+// fator que a placa REALMENTE tinha (1,051, não 1,076/1,088). O fator
+// medido correto é 0,9383 (não 0,9188). TILT_SCALE_CORRECTION_POS volta
+// para 1,066 — o resíduo cai para desvio-padrão 0,062° e viés médio -0,008°
+// (o melhor resultado de todas as rodadas; 1,088 dava desvio 0,123°).
+// Lição: ao reutilizar uma leitura já corrigida pelo firmware para
+// recalibrar, é essencial confirmar a versão REALMENTE gravada na placa
+// (characteristic/registrador de versão), não assumir pela palavra do
+// operador — o app mostra isso no botão "Testar conexão".
+//
+// O lado negativo continua com só os 9 pontos originais (até -8,6°, estes
+// sim colhidos sem nenhuma correção de firmware, direto do ensaio inicial)
+// — mais pontos desse lado, numa faixa maior, teriam o mesmo benefício que
+// o positivo já teve. Refazer esta calibração (os dois lados, com mais
+// pontos se possível) se o MPU6050 físico for substituído.
 constexpr float TILT_SCALE_CORRECTION_NEG = 1.042f;  // 1 / 0,9593
-constexpr float TILT_SCALE_CORRECTION_POS = 1.088f;  // 1 / 0,9188
+constexpr float TILT_SCALE_CORRECTION_POS = 1.066f;  // 1 / 0,9383
 
 // ============================================================================
 // Filtro da leitura contínua (só do ângulo "normal" — o Modo Vibração NÃO
