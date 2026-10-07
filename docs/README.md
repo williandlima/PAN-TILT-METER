@@ -94,11 +94,21 @@ do Windows. Os caminhos por código-fonte (CD1+CD2) ou pasta executável
 solta são só para desenvolvimento/manutenção do software — nenhum dos
 dois cria ícone de atalho.
 
-Na gravação de firmware, o `esptool` (standalone, na mídia) precisa estar
-acessível pelo **PATH do Windows** na máquina de gravação — o procedimento
-traz o passo com `setx PATH` para isso (seção 3, passo 5); sem isso, o
-comando `esptool` só funciona se o terminal for aberto exatamente na pasta
-onde o executável foi copiado.
+No firmware, o **CD(3) DSE** traz os três binários já compilados
+(`firmware.bin`, `bootloader.bin`, `partitions.bin`) e o `esptool` — único
+material necessário para a gravação em campo/fábrica (seção 4.2 do
+procedimento). O **CD(2) DSF** (a pasta `firmware/` do projeto PlatformIO)
+só é retirado do repositório físico quando for preciso recompilar ou
+alterar o firmware, nunca durante a gravação. O **CD(1) DAD** (instalador
+do VSCodium/VS Code com a extensão PlatformIO) segue a mesma regra dos
+outros dois procedimentos — arquivado só por garantia/rastreabilidade,
+nunca usado na gravação.
+
+Na gravação de firmware, o `esptool` (standalone, no CD(3) DSE) precisa
+estar acessível pelo **PATH do Windows** na máquina de gravação — o
+procedimento traz o passo com `setx PATH` para isso (seção 3, passo 5);
+sem isso, o comando `esptool` só funciona se o terminal for aberto
+exatamente na pasta onde o executável foi copiado.
 
 O procedimento de teste funcional (seção 3) e o de instalação do software
 Python (seção 3) trazem cada um um diagrama em blocos do respectivo setup,
