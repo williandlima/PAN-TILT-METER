@@ -3,9 +3,9 @@
 Mapeamento completo de pinos do ESP32, para o hardware **definido e
 confirmado**: **MPU6050 via I2C** (sensor) + **comunicação com o PC via
 cabo USB direto** (sem RS485 — decisão tomada explicitamente, ver
-`firmware/README.md`). Placa confirmada: **ESP32 DevKit clássico
-(WROOM-32)**, com chip conversor USB-serial **CH9102X** (WCH) identificado
-na placa física em uso.
+`firmware/README.md`). Placa confirmada: **ESP32-DevKitC V4** (placa
+oficial da Espressif, módulo WROOM-32), com chip conversor USB-serial
+**CP2102N** (Silicon Labs) integrado à placa.
 
 ## I2C — MPU6050 (acelerômetro)
 
@@ -44,24 +44,24 @@ internamente ligada à UART0 do chip.
 ### Chip conversor USB-serial (na placa, não no ESP32)
 
 O ESP32 (módulo WROOM-32) **não tem USB nativo** — quem faz a conversão
-USB ↔ UART é um chip à parte, já embutido na placa DevKit. Na placa usada
-neste projeto, esse chip é o **CH9102X** (fabricante WCH, mesma família do
-CH340, só que mais novo/mais rápido). Isso já resolve tudo sozinho:
+USB ↔ UART é um chip à parte, já embutido na placa DevKitC. Na placa usada
+neste projeto, esse chip é o **CP2102N** (fabricante Silicon Labs, mesma
+família dos CP210x, consagrada em placas de desenvolvimento). Isso já
+resolve tudo sozinho:
 
-- Não precisa de nenhum adaptador externo (CP2102 ou outro) — o CH9102X
-  já faz esse papel.
-- Pode precisar instalar o driver **CH9102** da WCH no Windows, caso a
-  porta COM não apareça automaticamente ao conectar (ver
-  `python-app/windows/INSTALACAO_WINDOWS.md`). No Linux costuma funcionar
-  nativo, sem driver adicional.
-- Alimentação do CH9102X vem do **VBUS (5V)** do próprio USB (pino
-  `VDD5`); o pino `V3` é só a saída do regulador 3,3V *interno* do chip
-  (leva só um capacitor de desacoplamento) — não alimenta o ESP32. O 3,3V
-  do ESP32/MPU6050 vem de um regulador separado, já embutido na placa
-  DevKit.
-- O pull-up de 1,5kΩ no D+ (sinalização USB full-speed) também já está
-  embutido no CH9102X — nada disso é fiação que o projeto precisa
-  adicionar.
+- Não precisa de nenhum adaptador externo — o CP2102N já faz esse papel,
+  sem componentes USB adicionais (USB 2.0 full-speed, até 3 Mbaud).
+- Normalmente é reconhecido automaticamente pelo Windows 10/11 (driver
+  Silicon Labs CP210x costuma já vir no sistema) e nativamente no Linux.
+  Se a porta COM não aparecer, instalar o driver **CP210x VCP** da
+  Silicon Labs (ver `python-app/windows/INSTALACAO_WINDOWS.md`).
+- Alimentação do CP2102N vem do **VBUS (5V)** do próprio USB, com
+  regulação interna para a lógica em 3,3V — o 3,3V do ESP32/MPU6050 vem de
+  um regulador separado, já embutido na placa DevKitC.
+- VID:PID de fábrica bem conhecido e estável (`10C4:EA60`, Silicon Labs) —
+  diferente do chip anterior (CH9102X), cujo VID/PID não era confiável o
+  bastante para filtrar portas por ele (ver nota em
+  `python-app/data_source/modbus_source.py`).
 
 ## Bluetooth LE
 
@@ -159,13 +159,14 @@ datasheet do módulo, não de uma placa específica.
     aparece com o tilt zerado. Medir o mesmo movimento de pan com o tilt em
     0° e depois em ±45°/±60°: os dois têm que dar o mesmo ângulo. Se o valor
     com tilt grande sair maior ou menor, é o sinal deste termo.
-  - **Fator de escala** (`PAN_SCALE_CORRECTION`, hoje em 1.0): girar o eixo
-    de pan entre duas posições de separação angular conhecida e usar
-    `(ângulo real / integrado)`. É o erro dominante depois que o ZUPT resolve
-    o bias — tolerância de fábrica do giro é de ~±3%.
-- **Variante de placa**: esta pinagem assume um ESP32 DevKit clássico
-  (WROOM-32) — confirmado na placa física em uso, junto com o chip
-  conversor USB-serial CH9102X (ver seção "USB" acima). Variantes
+  - **Fator de escala** (`PAN_SCALE_CORRECTION`, calibrado preliminarmente
+    em 1,030 — ver "Azimute (pan) pelo giroscópio" em `firmware/README.md`):
+    girar o eixo de pan entre duas posições de separação angular conhecida
+    e usar `(ângulo real / integrado)`. É o erro dominante depois que o
+    ZUPT resolve o bias — tolerância de fábrica do giro é de ~±3%.
+- **Variante de placa**: esta pinagem assume um ESP32-DevKitC V4 (módulo
+  WROOM-32) — confirmado na placa física em uso, junto com o chip
+  conversor USB-serial CP2102N (ver seção "USB" acima). Variantes
   diferentes (S3, C3, etc.) têm GPIOs restritos diferentes e podem
   precisar de ajuste.
 - **Placa vs. módulo**: a tabela de referência usa os nomes do datasheet

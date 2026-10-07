@@ -45,12 +45,13 @@ firmware/
     BleServer.h/.cpp      servidor BLE (GATT)
 ```
 
-## Pinagem (ESP32 DevKit clássico / WROOM-32)
+## Pinagem (ESP32-DevKitC V4 / WROOM-32)
 
-Hardware confirmado: placa **ESP32 DevKit clássico (WROOM-32)**, com chip
-conversor USB-serial **CH9102X** (WCH) — mapeamento definido, refletido em
-`firmware/src/Config.h`. Como a comunicação com o PC vai pela porta USB
-nativa do ESP32, o único hardware extra é o MPU6050:
+Hardware confirmado: placa oficial **ESP32-DevKitC V4** (Espressif, módulo
+WROOM-32), com chip conversor USB-serial **CP2102N** (Silicon Labs) —
+mapeamento definido, refletido em `firmware/src/Config.h`. Como a
+comunicação com o PC vai pela porta USB nativa do ESP32, o único hardware
+extra é o MPU6050:
 
 | Sinal | Pino ESP32 | Vai para | Observação |
 |---|---|---|---|

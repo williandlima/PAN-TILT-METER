@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 // ============================================================================
-// Configuração de hardware — pinagem definida para ESP32 DevKit clássico
+// Configuração de hardware — pinagem definida para ESP32-DevKitC V4
 // (WROOM-32). Ver firmware/README.md para o mapeamento completo.
 //
 // Comunicação com o PC é via cabo USB direto (porta serial nativa do ESP32,

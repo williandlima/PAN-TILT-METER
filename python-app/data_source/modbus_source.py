@@ -71,10 +71,11 @@ from data_source.base import (
     build_vibration_readings,
 )
 
-# Muitas placas ESP32 (incluindo a usada neste projeto, com chip CH9102)
-# resetam a placa via DTR/RTS toda vez que a porta serial é aberta — é o
-# mesmo mecanismo de auto-reset usado para gravar o firmware sem apertar
-# botão. O app abre a porta com as duas linhas desligadas para evitar isso
+# Muitas placas ESP32 (incluindo a usada neste projeto, ESP32-DevKitC V4
+# com chip CP2102N) resetam a placa via DTR/RTS toda vez que a porta
+# serial é aberta — é o mesmo mecanismo de auto-reset usado para gravar o
+# firmware sem apertar botão. O app abre a porta com as duas linhas
+# desligadas para evitar isso
 # (ver `_make_client`), e sonda a placa até ela responder em vez de esperar
 # um tempo fixo (ver BOARD_READY_TIMEOUT_S), para o caso de o driver do
 # chip USB-serial pulsar as linhas mesmo assim.
@@ -474,11 +475,13 @@ def _probe_port(port: str, baudrate: int, slave_id: int, timeout_s: float) -> bo
 def find_port(baudrate: int, slave_id: int, timeout_s: float = RESPONSE_TIMEOUT_S) -> str | None:
     """Varre as portas seriais do sistema em busca do ESP32, testando cada
     uma de verdade com `test_connection` (não dá pra confiar só em VID/PID:
-    o chip USB-serial do hardware confirmado, CH9102X, não tem um
-    VID/PID estável o bastante entre sistema operacional/driver para servir
-    de filtro sem risco de esconder a porta certa numa máquina diferente) —
-    exceto as que claramente não são candidatas, como as portas Bluetooth
-    virtuais (ver `_looks_like_bluetooth_port`).
+    o chip USB-serial do hardware confirmado, CP2102N, tem um VID:PID de
+    fábrica estável (`10C4:EA60`), mas é o padrão genérico da Silicon Labs
+    — compartilhado por inúmeros outros dispositivos USB-serial não
+    relacionados a este projeto, então filtrar por ele arriscaria tanto
+    ignorar a porta certa (driver/SO reportando algo diferente) quanto
+    aceitar a porta errada) — exceto as que claramente não são candidatas,
+    como as portas Bluetooth virtuais (ver `_looks_like_bluetooth_port`).
 
     Devolve o nome da primeira porta que responder como o ESP32, ou `None`
     se nenhuma responder. Cada porta errada custa até `PORT_PROBE_TIMEOUT_S`
