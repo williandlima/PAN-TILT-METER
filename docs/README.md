@@ -125,7 +125,6 @@ o contrário):
 | Documento | Conteúdo |
 |---|---|
 | [pinout.md](pinout.md) | Mapeamento completo de pinos do ESP32 (MPU6050 via I²C, comunicação USB). |
-| [`../projeto-mecanico/`](../projeto-mecanico/) | Vista explodida do conjunto mecânico (caixa Patola + bateria + regulador + ESP32 + MPU6050), em PNG (render 3D) e SVG (vetorial editável, com callouts numerados ligados à BOM) — figuras para o relatório técnico e o procedimento de teste. |
 | [fluxograma-python-app.md](fluxograma-python-app.md) | Arquitetura e fluxos de execução do software desktop (`python-app/`, PyQt5). |
 | [`HARDWARE/README.md`](../HARDWARE/README.md) | Versão de consulta rápida da lista de materiais (BOM), com datasheets linkados. |
 | README de cada módulo (`python-app/`, `android-app/`, `firmware/`) | Instalação, uso e detalhes de implementação específicos de cada software. |
