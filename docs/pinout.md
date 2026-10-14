@@ -150,15 +150,14 @@ datasheet do módulo, não de uma placa específica.
     de giro) e os sinais corretos para o `atan2()` bater com o sentido
     físico (crescente = subindo).
 - **Orientação do giroscópio para o pan**: a compensação de tilt em
-  `firmware/src/PanSensor.cpp` (`ω_pan = gz·cos θ − gy·sin θ`) assume a mesma
-  orientação de montagem acima — eixo X no eixo mecânico de tilt, rotação no
-  plano Y-Z. Duas coisas para confirmar na **mesma sessão de bancada**, já
-  que dependem da mesma montagem:
-  - **Sinal do termo `−gy·sin θ`**: depende da handedness real. Perto de
-    `θ=0` esse termo some (sobra só `gz·cos θ`), então um sinal trocado não
-    aparece com o tilt zerado. Medir o mesmo movimento de pan com o tilt em
-    0° e depois em ±45°/±60°: os dois têm que dar o mesmo ângulo. Se o valor
-    com tilt grande sair maior ou menor, é o sinal deste termo.
+  `firmware/src/PanSensor.cpp` (`ω_pan = gz·cos θ + gy·sin θ`, corrigida na
+  1.6.15 — até a 1.6.14 o sinal do termo de `gy` estava trocado) é o
+  produto escalar da vertical medida pelo acelerômetro com a velocidade
+  angular medida pelo giro, nos mesmos eixos do chip: não depende da
+  handedness da montagem, só de o eixo X estar no eixo mecânico de tilt.
+  Duas coisas para confirmar na **mesma sessão de bancada**:
+  - **Compensação de tilt**: medir o mesmo movimento de pan com o tilt em
+    0° e depois em ±30°/±45°: os dois têm que dar o mesmo ângulo.
   - **Fator de escala** (`PAN_SCALE_CORRECTION`, calibrado preliminarmente
     em 1,030 — ver "Azimute (pan) pelo giroscópio" em `firmware/README.md`):
     girar o eixo de pan entre duas posições de separação angular conhecida

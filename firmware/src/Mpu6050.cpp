@@ -18,20 +18,26 @@ bool Mpu6050::begin() {
 }
 
 bool Mpu6050::configure() {
-    // Sai do modo sleep (padrão de fábrica) e usa o clock interno.
-    if (!writeRegister(REG_PWR_MGMT_1, 0x00)) {
-        return false;
-    }
     // Liga o filtro passa-baixa interno e fixa o fundo de escala — ver a
     // justificativa de cada valor em Mpu6050.h. A banda é a corrente (a do
     // Modo Vibração, se houver captura em andamento).
+    //
+    // Tudo isso ANTES de acordar o chip (os registradores aceitam escrita em
+    // sleep): depois de um reset ele volta em +-250°/s, e acordado com uma
+    // escrita do meio falhando ele mediria o giro 4x maior do que o driver
+    // converte até a próxima checagem — 1 s de pan integrado errado. Dormindo,
+    // lê zeros, que readMotion() já descarta.
     if (!writeRegister(REG_CONFIG, _dlpfCfg)) {
         return false;
     }
     if (!writeRegister(REG_ACCEL_CONFIG, ACCEL_RANGE_2G)) {
         return false;
     }
-    return writeRegister(REG_GYRO_CONFIG, GYRO_RANGE_250DPS);
+    if (!writeRegister(REG_GYRO_CONFIG, GYRO_RANGE_1000DPS)) {
+        return false;
+    }
+    // Sai do modo sleep (padrão de fábrica) e usa o clock interno.
+    return writeRegister(REG_PWR_MGMT_1, 0x00);
 }
 
 void Mpu6050::maintain() {
@@ -46,7 +52,7 @@ void Mpu6050::maintain() {
     bool readOk = readRegister(REG_PWR_MGMT_1, pwr) && readRegister(REG_CONFIG, cfg) &&
                   readRegister(REG_GYRO_CONFIG, gyro) && readRegister(REG_ACCEL_CONFIG, accel);
     bool configOk = readOk && pwr == 0x00 && (cfg & 0x07) == _dlpfCfg &&
-                    (gyro & 0x18) == GYRO_RANGE_250DPS && (accel & 0x18) == ACCEL_RANGE_2G;
+                    (gyro & 0x18) == GYRO_RANGE_1000DPS && (accel & 0x18) == ACCEL_RANGE_2G;
     if (configOk && !busStuck) {
         return;
     }

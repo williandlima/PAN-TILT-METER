@@ -4,7 +4,8 @@
 
 // Driver mínimo para o MPU6050 via I2C (sem biblioteca externa).
 // Registradores e escalas default (acelerômetro +-2g, 16384 LSB/g;
-// giroscópio +-250°/s, 131 LSB/°/s) conforme o datasheet do MPU6050.
+// giroscópio +-1000°/s, 32,8 LSB/°/s — ver GYRO_RANGE_1000DPS) conforme o
+// datasheet do MPU6050.
 //
 // Dois caminhos de leitura, para dois consumidores diferentes:
 // - readAccelG(): só o acelerômetro (6 bytes), usado pelo AngleSensor para
@@ -53,7 +54,7 @@ private:
     static constexpr uint8_t REG_ACCEL_CONFIG = 0x1C;
     static constexpr uint8_t REG_ACCEL_XOUT_H = 0x3B;
     static constexpr float ACCEL_SENSITIVITY_LSB_PER_G = 16384.0f;
-    static constexpr float GYRO_SENSITIVITY_LSB_PER_DPS = 131.0f;
+    static constexpr float GYRO_SENSITIVITY_LSB_PER_DPS = 32.8f;
 
     // Bloco contíguo a partir de REG_ACCEL_XOUT_H: 6 bytes de acelerômetro,
     // 2 de temperatura e 6 de giroscópio. A temperatura fica no meio e não
@@ -89,11 +90,15 @@ private:
     // não depender do estado em que o chip foi encontrado.
     static constexpr uint8_t ACCEL_RANGE_2G = 0x00;
 
-    // Fundo de escala do giroscópio: +-250°/s, o mais sensível (131 LSB/°/s).
-    // Sobra folga de sobra para o caso de uso: o motor do pan gira a ~20-30°/s
-    // e a vibração do mastro sob vento fica na casa de 1°/s. Escolher uma
-    // faixa maior só jogaria fora resolução.
-    static constexpr uint8_t GYRO_RANGE_250DPS = 0x00;
+    // Fundo de escala do giroscópio: +-1000°/s (32,8 LSB/°/s). Até a 1.6.14
+    // era +-250°/s, pensado para o motor (~20-30°/s) — mas o pan também é
+    // girado À MÃO, e um giro de 90° em meio segundo passa de 350°/s no pico.
+    // Amostra no fundo de escala é descartada (valor cortado), e o trecho
+    // saturado era integrado com a taxa de antes/depois dele: +90° rápido
+    // chegou a ler 79-82° em simulação, com erro acumulando giro a giro. A
+    // resolução de 0,03°/s por LSB continua bem abaixo do ruído do sensor
+    // (~0,05°/s por amostra) e do limiar de parado do ZUPT.
+    static constexpr uint8_t GYRO_RANGE_1000DPS = 0x10;
 
     bool writeRegister(uint8_t reg, uint8_t value);
     bool readRegister(uint8_t reg, uint8_t &value);

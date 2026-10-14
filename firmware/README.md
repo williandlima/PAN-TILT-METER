@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.14`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.15`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -301,7 +301,9 @@ cabeçalho do header):
    Z dele não aponta pra vertical. Pegar `gz` cru subestimaria a taxa por
    `cos(tilt)` — a 60° de tilt a leitura sairia pela metade. A taxa correta é
    a projeção sobre a vertical escrita em coordenadas do corpo:
-   `ω_pan = gz·cos(θ) − gy·sin(θ)`, com `θ` vindo do **mesmo burst I2C**.
+   `ω_pan = gz·cos(θ) + gy·sin(θ)`, com `θ` vindo do **mesmo burst I2C**
+   (até a 1.6.14 o sinal do termo de `gy` estava trocado — ver "Ensaio de
+   bancada −30/+90/+30/+60/0" abaixo).
    Por ser uma projeção (produto escalar), e não a fórmula de taxa de Euler
    `(gy·sinφ + gz·cosφ)/cosθ`, não há singularidade em nenhum tilt.
 2. **ZUPT.** A cada 1s, se a **média** de `gy`/`gz` na janela estiver perto
@@ -438,6 +440,88 @@ de 0,1° pior.
 
 **Isso valida a matemática, não o hardware.** Falta rodar contra o MPU6050
 real — ver as duas confirmações de bancada nas limitações abaixo.
+
+### Ensaio de bancada −30/+90/+30/+60/0 (v1.6.15)
+
+Com a 1.6.14, em bancada, girando à mão para posições conhecidas:
+
+| Real | −30° | +90° | +30° | +60° | volta a 0° |
+|---|---|---|---|---|---|
+| Lido (1.6.14) | −35,6° | +83,5° | +20,2° | +49,1° | −7,5° |
+
+Erro que **cresce com o tempo**, não com o ângulo: o zero do giroscópio
+anda com o eixo parado (aquece por minutos depois de ligar, passeia), e o
+limiar de "parado" de 0,1°/s da 1.6.14 não acompanhava. Bastava o zero andar
+um pouco mais que 0,1°/s entre duas janelas paradas para **todas** as
+seguintes saírem do limiar; como janela em movimento não ensina o bias, ele
+nunca mais voltava, e a diferença era integrada sem fim. A 1.6.13 (limiar de
+1°/s) não tinha esse problema, mas perdia os giros lentos. Três correções e
+duas proteções em `PanSensor.cpp`/`Mpu6050.cpp`:
+
+1. **Bias que andou com o eixo parado** (`PAN_ZUPT_SHIFT_*`): 6 janelas
+   seguidas sem giro de verdade (abaixo de 2°/s) com médias sobre uma reta
+   lisa e pouco inclinada — ou 20 seguidas abaixo de 1°/s, como a 1.6.13
+   tratava — só podem ser o eixo parado sob um bias que mudou. O bias é
+   readotado e o que essas janelas integraram é desfeito.
+2. **Limiar adaptado ao próprio giro** (`PAN_ZUPT_WANDER_*`): o passo da
+   média entre janelas paradas é medido o tempo todo, e o limiar não fica
+   abaixo de 4× esse passo. Sensor estável: 0,1°/s; sensor que passeia: sobe
+   na medida.
+3. **Bias acompanha mais rápido** (`PAN_ZUPT_BIAS_ALPHA` 0,1 → 0,3).
+4. **Sinal da compensação de tilt corrigido**: `ω_pan = gz·cos θ + gy·sin θ`.
+   O sinal trocado multiplicava a taxa por `cos(2θ)` — 6% a menos a 10° de
+   tilt, metade a 30°, zero a 45° e o sentido invertido acima disso. Os
+   simuladores tinham o mesmo sinal trocado no sensor falso e por isso não
+   pegavam; agora usam a física (`gy = Ω·sin θ`).
+5. **Fundo de escala do giro ±250 → ±1000°/s**: girar 90° à mão em meio
+   segundo passa de 350°/s no pico. As amostras saturadas eram descartadas e
+   o trecho integrado com a taxa de antes/depois (simulado: +90° rápido lia
+   79-82°, com o erro somando giro a giro). Com o fundo de escala maior, um
+   quadro de lixo do I2C traz giro de até 1000°/s; amostra com salto
+   impossível em 10 ms (`PAN_GYRO_SLEW_MAX_DPS`, 100°/s) é descartada. E o
+   chip agora é configurado **antes** de acordar: depois de um reset ele
+   volta em ±250°/s, e acordado com uma escrita do meio falhando mediria o
+   giro 4× maior até a checagem seguinte.
+
+`sim/pan_sim.cpp`, com o ensaio acima e o zero do giro andando:
+
+| Cenário | 1.6.14 | 1.6.15 |
+|---|---|---|
+| P: −30/+90/+30/+60/0, zero passeando (0,02°/s/√s) | −30,0/88,7/27,0/56,2/−2,5 (pior 3,8°) | pior 0,17° |
+| Q: idem, logo depois de ligar (zero +2°/s em ~1 min) | −17,7/90/49,2/90/54,5 (pior 54°) | pior 0,10° |
+| R: tilt 30° fixo, pan +40° | 20,0° | 40,0° |
+
+Avaliação com 20 sementes do mesmo ensaio (pior erro das 5 leituras,
+mediana / p90), sensor com DLPF, quantização e saturação reais:
+
+| Condição | 1.6.13 | 1.6.14 | 1.6.15 |
+|---|---|---|---|
+| giro estável, tilt 0° | 0,09 / 0,52° | 0,02 / 0,07° | 0,02 / 0,07° |
+| giro estável, tilt 30° | 45 / 45° | 45 / 45° | 0,02 / 0,07° |
+| zero passeando 0,02°/s/√s | 0,25 / 0,61° | 3,6 / 14° | 0,22 / 0,45° |
+| zero passeando 0,03°/s/√s | 0,23 / 0,42° | 11 / 20° | 0,44 / 0,88° |
+| aquecimento +2°/s em ~1 min | 0,32 / 0,50° | 48 / 75° | 0,16 / 0,29° |
+| giro à mão +8° em 4 s | perde 1,6° | 0,01° | 0,01° |
+| giro à mão +8° em 16 s | perde tudo | 0,04° | 0,04° |
+| 8 passos de +1° | perde tudo | 0,03° | 0,03° |
+
+Os cenários A-O continuam passando (N agora é +8° em 16 s: mais lento que
+isso é indistinguível de um zero que andou). No soak de 100 sementes (motor,
+deriva térmica, vibração, todas as falhas de hardware, agora com o sensor
+emulado no sinal físico e com o fundo de escala do registrador): mediana
+0,30°, p90 0,65°, pior 1,05° — 99 de 100 sementes dentro de 1°.
+
+**Limites que sobram:**
+
+- giro à mão contínuo e muito lento — velocidade quase constante abaixo de
+  ~0,5°/s por vários segundos, ou abaixo de 1°/s por mais de ~20 s — é
+  tomado como zero que andou e apagado (+8° em 24 s já se perde);
+- com o zero do giro passeando forte, o limiar sobe e giros lentos voltam a
+  perder um pouco, e entre duas leituras sobram alguns décimos de grau
+  (tabela acima). Em bancada: ligar e esperar 1-2 min antes de calibrar, e
+  girar em poucos segundos;
+- `PAN_SCALE_CORRECTION` (1,030) foi calibrado na 1.6.9 com o ZUPT antigo e
+  o sinal trocado; refazer a calibração com giros de 90° no tilt 0°.
 
 ## Modo Vibração no eixo de pan (v1.3.0)
 
@@ -729,12 +813,12 @@ tela de configuração, em vez de truncar em silêncio.
   precisão não quantificada e só 2 pontos (o tilt teve 24, contra um
   inclinômetro certificado). Refazer com mais pontos, mais afastados de
   zero, quando possível.
-- **[1.2.0] Sinal do termo de compensação de tilt a confirmar.** O termo
-  `−gy·sin(θ)` depende da handedness real da montagem. Perto de `θ=0` ele
-  some (só sobra `gz·cos θ`), então um sinal trocado **não apareceria** nos
-  testes feitos com o tilt zerado — testar panning com o tilt em ±45°/±60° e
-  conferir se bate com a mesma medida feita em `θ=0`. Resolve junto com a
-  confirmação de montagem do `atan2(ay, az)`, que já estava pendente.
+- **[1.2.0 → corrigido na 1.6.15] Sinal do termo de compensação de tilt.**
+  Estava trocado (`−gy·sin θ`): a taxa de pan saía multiplicada por
+  `cos(2θ)`. Não depende da montagem — o acelerômetro e o giro do mesmo chip
+  dão a vertical e a velocidade angular nos mesmos eixos, e a projeção é o
+  produto escalar dos dois. Confirmar em bancada mesmo assim: o mesmo giro
+  de pan com o tilt em 0° e em ±30°/±45° tem de dar o mesmo ângulo.
 - **[corrigido na 1.6.6] Modo Vibração via USB com uma amostra errada a cada
   32.** O bloco de amostras de tilt ocupa os input registers 31-62, que
   incluem o 40 — o da versão do firmware. Como a versão era testada antes,
@@ -816,7 +900,7 @@ tela de configuração, em vez de truncar em silêncio.
   `PAN_ZUPT_RATE_THRESHOLD_DPS`/`PAN_ZUPT_WINDOW_MS`.
 - **[1.2.0 → corrigido na 1.6.1] Mudança de tilt travava o pan em ±90°.**
   Até a 1.6.0 o bias era estimado sobre a taxa **já projetada**
-  (`gz·cos θ − gy·sin θ`), que depende de `θ`. A premissa de que "a janela de
+  (`gz·cos θ + gy·sin θ`), que depende de `θ`. A premissa de que "a janela de
   ZUPT seguinte reabsorve a diferença" estava errada: com bias de fábrica
   típico, 45° de mudança de tilt deslocava o bias projetado em ~1,5°/s —
   acima do limiar de 1°/s —, então **toda** janela parada passava a ser

@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.14";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10614;
+constexpr char FIRMWARE_VERSION[] = "1.6.15";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10615;
 
 // ============================================================================
 // Parâmetros Modbus RTU — devem bater com python-app/data_source/modbus_source.py
@@ -328,7 +328,12 @@ constexpr uint32_t PAN_ZUPT_WINDOW_MS = 1000;
 // MPU6050 com DLPF de 21 Hz) e do atraso com que o filtro de bias abaixo
 // acompanha a deriva térmica no pior caso de sim/soak_sim.cpp (±3°/s em
 // 5 min: até 0,08°/s), e abaixo de qualquer giro manual realista. Isso só é
-// seguro porque o bias não aprende com janelas fora deste limiar.
+// seguro porque o bias não aprende com janelas fora deste limiar — e, desde
+// a 1.6.15, porque um bias que andou além dele com o eixo parado é
+// reconhecido e readotado (PAN_ZUPT_SHIFT_*). Sem isso (1.6.14), bastava o
+// zero do giro passear um pouco para o bias nunca mais voltar ao limiar e a
+// diferença ser integrada sem fim. Este é o PISO: com um giro que passeia,
+// o limiar efetivo sobe (PAN_ZUPT_WANDER_*).
 constexpr float PAN_ZUPT_RATE_THRESHOLD_DPS = 0.1f;
 
 // Sob vibração, a média de uma janela não zera, e o desvio é proporcional à
@@ -376,6 +381,54 @@ constexpr float PAN_ZUPT_EDGE_STEP_DPS = 0.02f;
 constexpr int PAN_ZUPT_EDGE_PRE_WINDOWS = 2;
 constexpr uint16_t PAN_ZUPT_TAIL_MAX_WINDOWS = 10;
 
+// Bias que MUDOU com o eixo parado (aquecimento logo depois de ligar,
+// passeio do zero do giro). Com o limiar de "parado" baixo, basta o bias
+// andar um pouco mais que ele entre duas janelas paradas para TODAS as
+// seguintes saírem do limiar: como janela em movimento não ensina o bias,
+// ele não acompanhava mais, e a diferença era integrada sem fim. Foi o que
+// o ensaio de bancada da 1.6.14 mostrou: -30/+90/+30/+60/0 leu
+// -35,6/+83,5/+20,2/+49,1/-7,5 (cenários P-Q de sim/pan_sim.cpp).
+//
+// Saída: SHIFT_WINDOWS janelas seguidas sem giro de verdade (todas abaixo de
+// SHIFT_MAX_DPS, e sem pico de giro), com médias sobre uma reta lisa (resíduo
+// RMS abaixo de SHIFT_RESIDUAL_DPS, mais a parcela de vibração e de passeio
+// medido) e pouco inclinada (abaixo de SHIFT_SLOPE_MAX_DPS2 — o flanco de um
+// giro à mão sobe/desce bem mais rápido), só podem ser o eixo parado sob um
+// bias que andou. Ou então SHIFT_FORCE_WINDOWS janelas seguidas, todas
+// abaixo de SHIFT_FORCE_MAX_DPS (o limiar da 1.6.13), mesmo sem reta lisa:
+// é o que garante a saída com o zero passeando forte, e nunca é pior que a
+// 1.6.13, que tomava tudo isso por parado. O bias passa a ser o da reta (com
+// SHIFT_SLOPE_GAIN da inclinação dela: em 6 janelas metade é passeio, e
+// adotá-la inteira e extrapolá-la levou a leitura a -65° em simulação), e o
+// que foi integrado desde o começo da excursão é desfeito — por inteiro nas
+// janelas sem giro, e só a diferença de bias nas que tinham giro. Até
+// SHIFT_HISTORY janelas são lembradas.
+//
+// Custo: um giro à mão contínuo e muito lento — velocidade quase constante
+// abaixo de ~0,5°/s por vários segundos, ou abaixo de 1°/s por mais de 20 s
+// — é indistinguível de um zero que andou e é apagado. +8° em 16 s passa
+// (cenário N); em 24 s ou mais, não.
+constexpr int PAN_ZUPT_SHIFT_WINDOWS = 6;
+constexpr float PAN_ZUPT_SHIFT_MAX_DPS = 2.0f;
+constexpr float PAN_ZUPT_SHIFT_RESIDUAL_DPS = 0.02f;
+constexpr float PAN_ZUPT_SHIFT_SLOPE_MAX_DPS2 = 0.04f;
+constexpr float PAN_ZUPT_SHIFT_SLOPE_GAIN = 0.5f;
+constexpr int PAN_ZUPT_SHIFT_HISTORY = 60;
+constexpr int PAN_ZUPT_SHIFT_FORCE_WINDOWS = 20;
+constexpr float PAN_ZUPT_SHIFT_FORCE_MAX_DPS = 1.0f;
+constexpr float PAN_ZUPT_SHIFT_WANDER_FACTOR = 1.0f;
+
+// Limiar de "parado" adaptado à estabilidade do PRÓPRIO giro: o quanto a
+// média muda de uma janela parada para a seguinte (passeio do zero, deriva)
+// é medido continuamente (média móvel do quadrado, WANDER_WINDOWS janelas —
+// também nas janelas que a saída acima provou paradas), e o limiar não fica
+// abaixo de WANDER_FACTOR vezes esse passo. Com o sensor estável o limiar
+// continua em PAN_ZUPT_RATE_THRESHOLD_DPS; com um giro que passeia, sobe na
+// medida para o bias não escapar do limiar a toda hora — à custa de deixar
+// de ver giros mais lentos.
+constexpr float PAN_ZUPT_WANDER_FACTOR = 4.0f;
+constexpr int PAN_ZUPT_WANDER_WINDOWS = 30;
+
 // Coerência exigida entre as médias de duas janelas seguidas para ADOTAR o
 // bias inicial (boot e calibração; ver "BOOT E RECUPERAÇÃO" em
 // PanSensor.h). Mais folgado que o limiar de "parado" de propósito: sob
@@ -396,8 +449,11 @@ constexpr float PAN_ZUPT_PEAK_DPS = 8.0f;
 
 // Velocidade com que o bias persegue a média das janelas paradas. O começo
 // suave de um giro que passe por parado e o ensine é desfeito quando o giro
-// é detectado (PAN_ZUPT_EDGE_*).
-constexpr float PAN_ZUPT_BIAS_ALPHA = 0.1f;
+// é detectado (PAN_ZUPT_EDGE_*). Até a 1.6.14 era 0,1: lento demais para um
+// zero de giro que passeia — o atraso do bias chegava ao limiar de 0,1°/s e
+// o eixo parado deixava de ser reconhecido. Com 0,3 o atraso cai à metade,
+// e o ruído da média de uma janela (~0,005°/s) continua irrelevante.
+constexpr float PAN_ZUPT_BIAS_ALPHA = 0.3f;
 
 // O bias do giro deriva com a temperatura (o chip esquenta por minutos
 // depois de ligado; o datasheet dá até ±20°/s na faixa de temperatura).
@@ -447,6 +503,17 @@ constexpr float PAN_BIAS_RELEARN_VIBRATION_FACTOR = 0.5f;
 // (PAN_ZUPT_VIBRATION_FACTOR). O descarte em si é feito pela mediana, sempre.
 constexpr float PAN_SPIKE_REPORT_DPS = 30.0f;
 
+// Maior variação fisicamente possível do giro entre duas amostras (10 ms):
+// com o DLPF de 21 Hz, nem um giro de 90° em 0,3 s à mão passa de ~70°/s por
+// amostra. Um quadro de lixo do barramento I2C que passe pelo teste de
+// plausibilidade do acelerômetro (metade deles passa) traz giro aleatório
+// em todo o fundo de escala (±1000°/s), e três seguidos venciam a mediana:
+// ~2,5° de pan num instante, com o eixo parado. Amostra com salto maior que
+// isto é descartada como leitura falha; depois de MAX_REJECTS seguidas, a
+// referência é que está velha, e a amostra é aceita.
+constexpr float PAN_GYRO_SLEW_MAX_DPS = 100.0f;
+constexpr uint8_t PAN_GYRO_SLEW_MAX_REJECTS = 3;
+
 // Correção do fator de escala do giroscópio (tolerância de fábrica ~+-3%).
 // Este é o erro dominante depois que o ZUPT resolve o bias, e é proporcional
 // ao deslocamento atual em relação ao zero — não se acumula com o tempo nem
@@ -478,6 +545,8 @@ constexpr float PAN_MAX_INTEGRATION_DT_S = 0.3f;
 // Escala das amostras de vibração do eixo de pan no protocolo. Diferente do
 // tilt, o que trafega aqui é VELOCIDADE ANGULAR (graus/s), não ângulo — ver
 // "Modo Vibração no eixo de pan" em firmware/README.md. Com escala 100 e
-// int16, a faixa vai a +-327°/s, cobrindo com folga o fundo de escala de
-// +-250°/s do giroscópio: nenhum movimento fisicamente possível satura.
+// int16, a faixa vai a +-327°/s. O giroscópio vai a +-1000°/s desde a 1.6.15
+// (por causa dos giros à mão, ver Mpu6050.h); a captura de vibração, feita
+// com o eixo parado ou balançando, fica na casa de 1°/s, e o que passar de
+// +-327°/s é saturado em VibrationCapture::toInt16.
 constexpr float PAN_RATE_SCALE = 100.0f;

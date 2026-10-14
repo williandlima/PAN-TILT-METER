@@ -20,7 +20,7 @@ float PanSensor::panRateDps(float gyDps, float gzDps, float tiltRad) const {
     // Projeção da velocidade angular sobre a vertical, escrita em coordenadas
     // do corpo (item 1 do cabeçalho de PanSensor.h), com o bias de cada eixo
     // removido ANTES de projetar (item 2).
-    return (gzDps - _biasGzDps) * cosf(tiltRad) - (gyDps - _biasGyDps) * sinf(tiltRad);
+    return (gzDps - _biasGzDps) * cosf(tiltRad) + (gyDps - _biasGyDps) * sinf(tiltRad);
 }
 
 float PanSensor::readInstantRateDps() {
@@ -100,6 +100,21 @@ void PanSensor::update() {
         _lastAttemptMs = now;
         return;  // falha de I2C: preserva o estado em vez de corrompê-lo
     }
+    // Salto impossível desde a última amostra boa (ver PAN_GYRO_SLEW_MAX_DPS):
+    // quadro de lixo do barramento que passou pelo teste do acelerômetro.
+    // Descartado como uma falha de leitura — nem entra na mediana, que só
+    // dá conta de 2 seguidos. Depois de PAN_GYRO_SLEW_MAX_REJECTS seguidos, a
+    // referência é que está velha: aceita.
+    if (_hasLastSample && now - _lastSampleMs <= 3 * ANGLE_SAMPLE_INTERVAL_MS &&
+        _slewRejects < PAN_GYRO_SLEW_MAX_REJECTS &&
+        (fabsf(gyDps - _lastGyDps) > PAN_GYRO_SLEW_MAX_DPS || fabsf(gzDps - _lastGzDps) > PAN_GYRO_SLEW_MAX_DPS)) {
+        _slewRejects++;
+        _spikeCount++;
+        _failedAttempt = true;
+        _lastAttemptMs = now;
+        return;
+    }
+    _slewRejects = 0;
     _failedAttempt = false;
     uint32_t elapsedMs = now - _lastSampleMs;
     _lastSampleMs = now;
@@ -250,8 +265,11 @@ void PanSensor::closeWindow(uint32_t now) {
     float vibVar = fastVar - PAN_ZUPT_NOISE_SPREAD_DPS * PAN_ZUPT_NOISE_SPREAD_DPS;
     float spreadDps = vibVar > 0.0f ? sqrtf(vibVar) : 0.0f;
     float threshold = fmaxf(PAN_ZUPT_RATE_THRESHOLD_DPS, PAN_ZUPT_VIBRATION_FACTOR * spreadDps);
+    threshold = fmaxf(threshold, PAN_ZUPT_WANDER_FACTOR * sqrtf(_wanderVar));
+    bool prevStill = _prevStill;
+    _prevStill = false;
     // Desvio com sinal, projetado na vertical: o sentido do giro.
-    float signedDps = dGz * cosf(_lastTiltRad) - dGy * sinf(_lastTiltRad);
+    float signedDps = projectedDps(dGy, dGz, _lastTiltRad);
     bool stillCandidate = hypotf(dGy, dGz) < threshold && _windowPeakDps < PAN_ZUPT_PEAK_DPS;
 
     if (stillCandidate && _prevMoving && _tailWindows < PAN_ZUPT_TAIL_MAX_WINDOWS &&
@@ -261,6 +279,8 @@ void PanSensor::closeWindow(uint32_t now) {
         _tailWindows++;
         _lastMovingDps = signedDps;
         pushRelearnWindow(meanGyDps, meanGzDps, _windowDeltaDeg, spreadDps);
+        pushExcursion({meanGyDps, meanGzDps, _windowDeltaDeg, winS, _lastTiltRad, spreadDps, hypotf(dGy, dGz), true});
+        tryShiftEscape();
         resetWindow(now);
         return;
     }
@@ -269,7 +289,12 @@ void PanSensor::closeWindow(uint32_t now) {
         // Janela parada: refina o bias (filtro alfa-beta: nível e velocidade
         // de deriva) e desfaz o que foi integrado nela, para o ruído do giro
         // não virar random walk enquanto parado.
-        pushBiasUndo(now, winS, signedDps, spreadDps);
+        pushBiasUndo(now, winS, signedDps, spreadDps, meanGyDps, meanGzDps);
+        if (prevStill && hadPrev) {
+            learnWander(meanGyDps - prevGyDps, meanGzDps - prevGzDps);
+        }
+        _prevStill = true;
+        _excCount = 0;
         _prevMoving = false;
         _tailWindows = 0;
         _biasGyDps += PAN_ZUPT_BIAS_ALPHA * dGy;
@@ -293,8 +318,14 @@ void PanSensor::closeWindow(uint32_t now) {
         _prevMoving = true;
         _tailWindows = 0;
         _lastMovingDps = signedDps;
+        bool quiet = hypotf(dGy, dGz) < fmaxf(PAN_ZUPT_SHIFT_MAX_DPS, PAN_ZUPT_VIBRATION_FACTOR * spreadDps) &&
+                     _windowPeakDps < PAN_ZUPT_PEAK_DPS;
         pushRelearnWindow(meanGyDps, meanGzDps, _windowDeltaDeg, spreadDps);
+        pushExcursion({meanGyDps, meanGzDps, _windowDeltaDeg, winS, _lastTiltRad, spreadDps, hypotf(dGy, dGz), quiet});
         tryRelearn(winS);
+        if (_excCount > 0) {  // tryRelearn() não adotou
+            tryShiftEscape();
+        }
     }
 
     resetWindow(now);
@@ -311,7 +342,7 @@ bool PanSensor::isEdgeOf(float edgeDps, float spreadDps, float motionDps) {
     return edge <= fabsf(motionDps) - PAN_ZUPT_EDGE_STEP_DPS;
 }
 
-void PanSensor::pushBiasUndo(uint32_t now, float winS, float signedDps, float spreadDps) {
+void PanSensor::pushBiasUndo(uint32_t now, float winS, float signedDps, float spreadDps, float meanGy, float meanGz) {
     if (_undoCount == UNDO_LEN) {
         for (int i = 0; i < UNDO_LEN - 1; i++) {
             _undo[i] = _undo[i + 1];
@@ -319,11 +350,11 @@ void PanSensor::pushBiasUndo(uint32_t now, float winS, float signedDps, float sp
         _undoCount--;
     }
     _undo[_undoCount++] = BiasSnapshot{_biasGyDps, _biasGzDps, _biasSlopeGy, _biasSlopeGz, now, _sinceStillS,
-                                       _windowDeltaDeg, signedDps, spreadDps, winS, _lastTiltRad};
+                                       _windowDeltaDeg, signedDps, spreadDps, winS, _lastTiltRad, meanGy, meanGz};
 }
 
 float PanSensor::projectedDps(float dGy, float dGz, float tiltRad) {
-    return dGz * cosf(tiltRad) - dGy * sinf(tiltRad);
+    return dGz * cosf(tiltRad) + dGy * sinf(tiltRad);
 }
 
 void PanSensor::undoRecentBiasLearning(uint32_t now, float winS, float motionDps) {
@@ -383,9 +414,12 @@ void PanSensor::undoRecentBiasLearning(uint32_t now, float winS, float motionDps
         // Só a cadeia volta; antes dela, só a correção de bias (a janela foi
         // cancelada, então não há o que corrigir nela).
         if (k < first) continue;
-        _panDeg += w.deltaDeg + projectedDps((w.gy - w.slopeGy * hk) - revGyAt(w.ms, hk),
-                                             (w.gz - w.slopeGz * hk) - revGzAt(w.ms, hk), w.tiltRad) *
-                                    w.winS * PAN_SCALE_CORRECTION;
+        float restored = w.deltaDeg + projectedDps((w.gy - w.slopeGy * hk) - revGyAt(w.ms, hk),
+                                                   (w.gz - w.slopeGz * hk) - revGzAt(w.ms, hk), w.tiltRad) *
+                                          w.winS * PAN_SCALE_CORRECTION;
+        _panDeg += restored;
+        // Voltaram a ser giro: fazem parte da excursão que começa aqui.
+        pushExcursion({w.meanGy, w.meanGz, restored, w.winS, w.tiltRad, w.spreadDps, fabsf(w.signedDps), true});
     }
     _panDeg += projectedDps((_biasGyDps - _biasSlopeGy * h) - revGyAt(now, h),
                             (_biasGzDps - _biasSlopeGz * h) - revGzAt(now, h), _lastTiltRad) *
@@ -468,6 +502,99 @@ void PanSensor::tryRelearn(float winS) {
     adoptBias(gyMean + bGy * tEnd, gzMean + bGz * tEnd, clampSlope(bGy * perS), clampSlope(bGz * perS), false);
 }
 
+void PanSensor::learnWander(float stepGy, float stepGz) {
+    _wanderVar += (stepGy * stepGy + stepGz * stepGz - _wanderVar) / PAN_ZUPT_WANDER_WINDOWS;
+}
+
+void PanSensor::pushExcursion(const ExcursionWindow &w) {
+    if (_excCount == EXC_LEN) {
+        for (int i = 0; i < EXC_LEN - 1; i++) {
+            _exc[i] = _exc[i + 1];
+        }
+        _excCount--;
+    }
+    _exc[_excCount++] = w;
+}
+
+bool PanSensor::tryShiftEscape() {
+    const int m = PAN_ZUPT_SHIFT_WINDOWS;
+    if (_excCount < m) {
+        return false;
+    }
+    // Janelas sem giro de verdade seguidas, contando do fim.
+    int quietRun = 0;
+    float runMaxDps = 0.0f;
+    while (quietRun < _excCount && _exc[_excCount - 1 - quietRun].quiet) {
+        runMaxDps = fmaxf(runMaxDps, _exc[_excCount - 1 - quietRun].devDps);
+        quietRun++;
+    }
+    const ExcursionWindow *last = _exc + (_excCount - m);
+    float gyMean = 0.0f, gzMean = 0.0f, spreadMean = 0.0f, winMean = 0.0f;
+    for (int k = 0; k < m; k++) {
+        if (!last[k].quiet) {
+            return false;  // giro de verdade entre as últimas janelas
+        }
+        gyMean += last[k].meanGy;
+        gzMean += last[k].meanGz;
+        spreadMean += last[k].spreadDps;
+        winMean += last[k].winS;
+    }
+    gyMean /= m;
+    gzMean /= m;
+    spreadMean /= m;
+    winMean /= m;
+    const float xMean = 0.5f * (m - 1);
+    float sxx = 0.0f, sxGy = 0.0f, sxGz = 0.0f;
+    for (int k = 0; k < m; k++) {
+        float dx = k - xMean;
+        sxx += dx * dx;
+        sxGy += dx * (last[k].meanGy - gyMean);
+        sxGz += dx * (last[k].meanGz - gzMean);
+    }
+    float bGy = sxGy / sxx, bGz = sxGz / sxx;  // °/s por janela
+    float ss = 0.0f;
+    for (int k = 0; k < m; k++) {
+        float dx = k - xMean;
+        float rGy = last[k].meanGy - (gyMean + bGy * dx);
+        float rGz = last[k].meanGz - (gzMean + bGz * dx);
+        ss += rGy * rGy + rGz * rGz;
+    }
+    float perS = winMean > 0.0f ? 1.0f / winMean : 0.0f;
+    float limit = PAN_ZUPT_SHIFT_RESIDUAL_DPS + PAN_BIAS_RELEARN_VIBRATION_FACTOR * spreadMean +
+                  PAN_ZUPT_SHIFT_WANDER_FACTOR * sqrtf(_wanderVar);
+    bool smooth = sqrtf(ss / m) < limit && hypotf(bGy, bGz) * perS <= PAN_ZUPT_SHIFT_SLOPE_MAX_DPS2;
+    bool forced = quietRun >= PAN_ZUPT_SHIFT_FORCE_WINDOWS && runMaxDps < PAN_ZUPT_SHIFT_FORCE_MAX_DPS;
+    if (!smooth && !forced) {
+        return false;
+    }
+    // Bias da reta no fim da última janela (a média dela é o meio).
+    float tEnd = (m - 1) - xMean + 0.5f;
+    float newGy = gyMean + bGy * tEnd, newGz = gzMean + bGz * tEnd;
+    float erase = 0.0f;
+    for (int k = 0; k < _excCount; k++) {
+        const ExcursionWindow &w = _exc[k];
+        if (w.quiet) {
+            erase += w.deltaDeg;
+        } else {
+            erase += projectedDps(newGy - _biasGyDps, newGz - _biasGzDps, w.tiltRad) * w.winS * PAN_SCALE_CORRECTION;
+        }
+    }
+    _panDeg -= erase;
+    clampIntegrator();
+    // Essas janelas eram paradas: o passo entre elas também mede o passeio
+    // do zero — justamente o que as janelas paradas, cortadas no limiar, não
+    // conseguem medir quando o passeio é maior que ele.
+    for (int k = 1; k < m; k++) {
+        learnWander(last[k].meanGy - last[k - 1].meanGy, last[k].meanGz - last[k - 1].meanGz);
+    }
+    // Em 6 janelas, metade da inclinação da reta é passeio do zero, não
+    // deriva: adotá-la inteira e extrapolá-la por 30 s afastava o bias até
+    // fora de qualquer limiar (simulado: -65° em 2 min com o zero passeando).
+    adoptBias(newGy, newGz, clampSlope(PAN_ZUPT_SHIFT_SLOPE_GAIN * bGy * perS),
+              clampSlope(PAN_ZUPT_SHIFT_SLOPE_GAIN * bGz * perS), true);
+    return true;
+}
+
 float PanSensor::clampSlope(float slope) {
     if (slope > PAN_BIAS_SLOPE_MAX_DPS2) return PAN_BIAS_SLOPE_MAX_DPS2;
     if (slope < -PAN_BIAS_SLOPE_MAX_DPS2) return -PAN_BIAS_SLOPE_MAX_DPS2;
@@ -498,6 +625,8 @@ void PanSensor::adoptBias(float gyDps, float gzDps, float slopeGy, float slopeGz
     _sinceStillS = 0.0f;
     _relearnCount = 0;
     _undoCount = 0;
+    _excCount = 0;
+    _prevStill = false;
     _prevMoving = false;
     _tailWindows = 0;
 }
@@ -553,6 +682,8 @@ void PanSensor::calibrate() {
     _hasPrevMean = false;
     _relearnCount = 0;
     _undoCount = 0;
+    _excCount = 0;
+    _prevStill = false;
     _prevMoving = false;
     _tailWindows = 0;
     resetWindow(millis());

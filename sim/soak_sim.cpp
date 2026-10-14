@@ -111,16 +111,20 @@ static void dataFrame(uint8_t out[14]) {
     // acelerômetro acima (ver PAN_SCALE_CORRECTION em Config.h, calibrado em
     // bancada na 1.6.9).
     static const double PAN_SENSOR_SCALE = 1.0 / PAN_SCALE_CORRECTION;
-    g[1] += -T.panRateF * PAN_SENSOR_SCALE * sin(th);
+    g[1] += T.panRateF * PAN_SENSOR_SCALE * sin(th);
     g[2] += T.panRateF * PAN_SENSOR_SCALE * cos(th);
+    // Sensibilidade conforme o fundo de escala programado (GYRO_CONFIG): depois
+    // de um reset do chip ele volta a +-250°/s até o firmware reconfigurar.
+    static const double kGyroLsb[4] = {131.0, 65.5, 32.8, 16.4};  // datasheet, por FS_SEL
+    const double gs = kGyroLsb[(regs[0x1B] >> 3) & 3];
     int16_t raw[7] = {
         0, toRaw(sin(th) + 0.002 * gauss(rng), 16384), toRaw(cos(th) + 0.002 * gauss(rng), 16384), 0,
-        toRaw(g[0], 131), toRaw(g[1], 131), toRaw(g[2], 131),
+        toRaw(g[0], gs), toRaw(g[1], gs), toRaw(g[2], gs),
     };
     if (F.gyroSpikeLeft > 0) {
         F.gyroSpikeLeft--;
         int axis = 1 + (int)urand(0, 2);
-        raw[4 + axis] = toRaw((urand() < 0.7 ? -1 : 1) * urand(100, 245), 131);
+        raw[4 + axis] = toRaw((urand() < 0.7 ? -1 : 1) * urand(100, 990), gs);
     }
     for (int i = 0; i < 7; i++) { out[2 * i] = (uint8_t)(raw[i] >> 8); out[2 * i + 1] = (uint8_t)raw[i]; }
     if (F.garbageLeft > 0) { F.garbageLeft--; for (int i = 0; i < 14; i++) out[i] = (uint8_t)urand(0, 256); }
@@ -287,7 +291,7 @@ static Result runSeed(unsigned seed, bool verbose) {
     }
     if (!moving && nowS() - stoppedAt >= 5) checkpoint();  // o fim pode cair no meio de um giro
 
-    bool cfgOk = regs[0x6B] == 0x00 && (regs[0x1A] & 7) == 4 && regs[0x1B] == 0 && regs[0x1C] == 0 && !F.stuck;
+    bool cfgOk = regs[0x6B] == 0x00 && (regs[0x1A] & 7) == 4 && regs[0x1B] == 0x10 && regs[0x1C] == 0 && !F.stuck;
     PanSensor::Diagnostics d = panSensor.diagnostics();
     printf("  semente %2u: %3d checagens, erro máx pan %.3f° tilt %.3f° | falhas injetadas: %d resets MPU, "
            "%d barr. travado, %d hangs, %d lixo, %d 0xFF, %d picos, %d loop parado | firmware: %u reconfig., "
