@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.13`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.14`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -311,7 +311,8 @@ cabeçalho do header):
    corretamente reconhecida como parada. O bias é estimado **por eixo, no
    referencial do sensor**, e só depois projetado — o bias de fábrica é fixo
    nos eixos do chip, e projetado ele mudaria com o tilt (ver a limitação
-   corrigida na 1.6.1, mais abaixo).
+   corrigida na 1.6.1, mais abaixo). Janela fora do limiar é movimento e
+   **não ensina nada ao bias** (ver "Giro lento, feito à mão" abaixo).
 3. **Cancelamento de janela parada.** O que foi integrado dentro de uma
    janela classificada como parada é subtraído de volta — parado, o ângulo
    fica cravado, sem random walk.
@@ -359,7 +360,81 @@ sinais sintéticos (bias de fábrica de 5°/s, ruído, vibração, tilt fixo):
 
 O piso de detecção medido bate com o previsto (`limiar × janela` = 1°/s × 1s):
 movimentos de até ~1° são descartados como ruído, e a partir de ~2° são
-preservados integralmente.
+preservados integralmente. *(Valores da 1.2.0; o limiar caiu para 0,1°/s
+na 1.6.14 — ver a seção seguinte.)*
+
+### Giro lento, feito à mão (v1.6.14)
+
+Em bancada, girando o eixo à mão, o pan **leu negativo (−0,6°) depois de um
+giro positivo** e, quando lia certo, **demorava muito para estabilizar**.
+A causa era o ZUPT: com limiar de 1°/s, um giro à mão (lento, com partida e
+parada suaves) caía janela a janela abaixo do limiar — cada janela era tida
+como parada, o que fora integrado nela era **apagado**, e 10% da velocidade
+do giro era **ensinada ao bias** a cada janela. Depois de parar, o bias
+errado puxava a leitura para o lado contrário do giro, e ela levava perto de
+um minuto para voltar enquanto o bias se corrigia. Reproduzido com o
+`PanSensor.cpp` real (`sim/pan_sim.cpp`, cenários K-O):
+
+| Cenário | 1.6.13 | 1.6.14 |
+|---|---|---|
+| K: giro à mão +8° em 4 s | 6,39°, oscilando ~0,19° por ~40 s | 7,98°, estável |
+| L: +8° em 16 s (pico 1°/s) | **0,00°**, mínimo −0,64° | 7,85°, nunca negativo, estável |
+| M: 8 passos de +1° (1,5 s cada) | **0,00°**, mínimo −0,53° | 7,95°, estável |
+| N: +8° em 32 s, depois −8° em 4 s | −6,12° | −0,34° |
+| O: +8° em 4 s sob vibração de 2°/s a 33,3 Hz | **+27,74°** (dispara) | 0,00° (não dispara) |
+
+O que mudou em `PanSensor::closeWindow()`:
+
+1. **Limiar de "parado" de 1°/s para 0,1°/s** (`PAN_ZUPT_RATE_THRESHOLD_DPS`),
+   ainda acima do ruído da média de uma janela e do atraso com que o filtro
+   de bias acompanha a pior deriva térmica simulada.
+2. **Janela de movimento não ensina o bias** — era ela que o contaminava.
+3. **Bordas do giro.** Partida e frenagem suaves ainda passam algumas
+   janelas abaixo de 0,1°/s. Elas são reconhecidas pela forma (mesmo sentido
+   do giro, velocidade crescendo ou caindo janela a janela — a deriva térmica
+   não forma essa rampa): na partida, quando o giro é detectado, o que foi
+   cancelado nelas **volta** e o que elas ensinaram ao bias é **desfeito**;
+   na frenagem, elas continuam sendo giro (`PAN_ZUPT_EDGE_*`).
+4. **Limiar adaptativo à vibração** (`PAN_ZUPT_VIBRATION_FACTOR`). Sob
+   vibração a média de uma janela não zera — e a mediana anti-picos
+   ("LEITURAS ESPÚRIAS" em `PanSensor.h`) piora isso: perto de submúltiplos
+   da amostragem de 100 Hz (33 Hz = 100/3, 14,3 Hz = 100/7) ela **retifica**
+   a vibração num bias falso que muda devagar. Um limiar fixo de 0,1°/s
+   falhava no soak de 100 sementes (até 2,5°). O limiar efetivo cresce com a
+   vibração medida na janela — pela diferença entre amostras brutas
+   sucessivas, que o próprio giro (mesmo acelerando à mão) quase não move, e
+   descontado o ruído do sensor. Sem vibração fica nos 0,1°/s; sob vibração
+   forte se aproxima do 1°/s antigo.
+5. **Deriva do bias limitada ao fisicamente possível**
+   (`PAN_BIAS_SLOPE_MAX_DPS2`, 0,05 → 0,015°/s²): uma deriva falsa aprendida
+   sob vibração forte era extrapolada por 30 s depois de parar e chegou a
+   levar a leitura a dezenas de graus (cenário O).
+6. **Adoção do bias** no boot/calibração usa a média das duas janelas
+   coerentes (`PAN_BIAS_ADOPT_COHERENCE_DPS`, ainda 1°/s, para não travar sob
+   vibração).
+7. **Rede de segurança** (reaprender o bias): antes bastavam 20 janelas
+   vizinhas "coerentes" a 1°/s — e um giro à mão lento e suave passava nesse
+   teste e era apagado. Agora as 20 médias têm de cair sobre uma **reta**
+   (bias constante ou derivando), com resíduo de 0,05°/s quando o bias já foi
+   confirmado parado (`PAN_BIAS_RELEARN_RESIDUAL_DPS`), maior sob vibração.
+
+Os cenários A-J (motor, mudanças de tilt, boot em movimento, leituras
+espúrias) continuam passando, e no soak de **100 sementes** (motor, deriva
+térmica, vibração de 5-15 Hz e todas as falhas de hardware) o resultado é o
+mesmo da 1.6.13: mediana 0,30°, p90 0,63°, pior 0,96°, nenhuma semente mais
+de 0,1° pior.
+
+**Limites que sobram:**
+
+- um giro extremamente lento — da ordem de 8° em 30 s ou mais, sem nenhum
+  trecho acima de ~0,1°/s por alguns segundos — se confunde com deriva
+  térmica nas bordas e pode perder alguns décimos de grau (cenário N). Em
+  bancada, girar em poucos segundos;
+- **sob vibração forte** (ex.: ≥1°/s acima de ~10 Hz no eixo), o limiar sobe
+  e um giro à mão lento volta a se perder como na 1.6.13 — agora sem
+  disparar (cenário O). O motor (20-30°/s) não é afetado;
+- abaixo de ~4 Hz, balanço do eixo é deslocamento angular de verdade e é
+  integrado (com média zero).
 
 **Isso valida a matemática, não o hardware.** Falta rodar contra o MPU6050
 real — ver as duas confirmações de bancada nas limitações abaixo.
@@ -733,10 +808,12 @@ tela de configuração, em vez de truncar em silêncio.
   `sim/pan_sim.cpp`: na 1.6.1, −90° travado; na 1.6.2, 29,75° e 0,00°
   corretos. O cenário H confirma que varreduras do motor (8 s a 20°/s) não
   disparam o reaprendizado.
-- **[1.2.0] Movimentos menores que ~1° são descartados** como ruído, por
-  causa do cancelamento de janela parada. É o compromisso da abordagem:
-  ajustável em `PAN_ZUPT_RATE_THRESHOLD_DPS`/`PAN_ZUPT_WINDOW_MS`, ao custo
-  de uma estimativa de bias pior.
+- **[1.2.0 → reduzido na 1.6.14] Movimentos pequenos são descartados** como
+  ruído, por causa do cancelamento de janela parada. Até a 1.6.13 o piso era
+  ~1° — e um giro à mão lento era descartado inteiro (ver "Giro lento, feito
+  à mão"); desde a 1.6.14 é ~0,1° para um movimento isolado, e as bordas
+  suaves de um giro maior são preservadas. Ajustável em
+  `PAN_ZUPT_RATE_THRESHOLD_DPS`/`PAN_ZUPT_WINDOW_MS`.
 - **[1.2.0 → corrigido na 1.6.1] Mudança de tilt travava o pan em ±90°.**
   Até a 1.6.0 o bias era estimado sobre a taxa **já projetada**
   (`gz·cos θ − gy·sin θ`), que depende de `θ`. A premissa de que "a janela de
