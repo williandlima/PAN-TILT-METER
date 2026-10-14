@@ -23,6 +23,10 @@ static uint32_t g_spikeEveryMs = 0, g_readCount = 0;
 static double g_spikeDps = 0;
 // Vibração do mastro (°/s por eixo, fases diferentes em gy e gz). 0 = sem.
 static double g_vibDps = 0, g_vibHz = 0;
+// Zero do giro que anda com o eixo parado: passeio aleatório (°/s/sqrt(s),
+// por eixo) e aquecimento (gz muda g_warmDps com constante g_warmTauS).
+static double g_walkDps = 0, g_walkGy = 0, g_walkGz = 0, g_warmDps = 0, g_warmTauS = 60;
+static std::normal_distribution<double> unit(0.0, 1.0);
 
 bool Mpu6050::begin() { return true; }
 bool Mpu6050::readAccelG(float &ax, float &ay, float &az) {
@@ -36,8 +40,9 @@ bool Mpu6050::readMotion(float &ax, float &ay, float &az, float &gx, float &gy, 
     static const double PAN_SENSOR_SCALE = 1.0 / PAN_SCALE_CORRECTION;
     gx = g_tiltRateDps + BGX + noise(rng);
     double ts = g_now_us / 1e6;
-    gy = -g_panRateDps * PAN_SENSOR_SCALE * sin(t) + BGY + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 1.3);
-    gz =  g_panRateDps * PAN_SENSOR_SCALE * cos(t) + BGZ + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 4.1);
+    double warm = g_warmDps * (1 - exp(-ts / g_warmTauS));
+    gy = g_panRateDps * PAN_SENSOR_SCALE * sin(t) + BGY + g_walkGy + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 1.3);
+    gz =  g_panRateDps * PAN_SENSOR_SCALE * cos(t) + BGZ + g_walkGz + warm + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 4.1);
     // Uma leitura a cada 10 ms (ANGLE_SAMPLE_INTERVAL_MS).
     if (g_spikeEveryMs && ++g_readCount % (g_spikeEveryMs / 10) == 0) gz = g_spikeDps;
     return true;
@@ -56,7 +61,7 @@ static double g_minPan, g_settleFrom, g_settleMin, g_settleMax;
 
 static double run(const char *name, const Seg *segs, int n, double endS, double startTilt, const double *reportAt, int nr) {
     Mpu6050 mpu; PanSensor pan(mpu);
-    g_now_us = 0; g_tiltDeg = startTilt; rng.seed(42);
+    g_now_us = 0; g_tiltDeg = startTilt; rng.seed(42); g_walkGy = g_walkGz = 0;
     g_minPan = 1e9; g_settleMin = 1e9; g_settleMax = -1e9;
     int r = 0;
     printf("== %s ==\n", name);
@@ -69,6 +74,8 @@ static double run(const char *name, const Seg *segs, int n, double endS, double 
             if (t >= m.t0 && t < m.t0 + m.T) g_panRateDps += (m.A / m.T) * (1 - cos(2 * M_PI * (t - m.t0) / m.T));
         }
         g_tiltDeg += g_tiltRateDps * 0.001;
+        g_walkGy += g_walkDps * sqrt(0.001) * unit(rng);
+        g_walkGz += g_walkDps * sqrt(0.001) * unit(rng);
         g_now_us = (uint64_t)ms * 1000;
         pan.update();
         double p = pan.readPanDeg();
@@ -157,8 +164,11 @@ int main() {
     const Move m[] = {{10, 1.5, 1}, {12.5, 1.5, 1}, {15, 1.5, 1}, {17.5, 1.5, 1},
                       {20, 1.5, 1}, {22.5, 1.5, 1}, {25, 1.5, 1}, {27.5, 1.5, 1}};
     hand("M", "M: passos a mao de +1 (8x, 1,5 s cada, pausa de 1 s)", m, 8, 80, 8, 0.2, true);
-    const Move nn[] = {{10, 32, 8}, {60, 4, -8}};
-    hand("N", "N: muito lento, +8 em 32 s, depois volta -8 em 4 s", nn, 2, 100, 0, 0.4, false);
+    // Mais lento que isto (velocidade quase constante abaixo de ~0,5°/s por
+    // vários segundos, ou abaixo de 1°/s por mais de 20 s) é indistinguível
+    // de um zero do giro que andou: ver PAN_ZUPT_SHIFT_* em Config.h.
+    const Move nn[] = {{10, 16, 8}, {44, 4, -8}};
+    hand("N", "N: lento, +8 em 16 s, depois volta -8 em 4 s", nn, 2, 80, 0, 0.4, false);
 
     // O: vibração forte (2°/s) a 33,3 Hz = 100/3, onde a mediana anti-picos
     // mais retifica a vibração num bias falso. Sob vibração forte o giro à
@@ -173,6 +183,66 @@ int main() {
     expect("O", run("O: vibracao 2°/s a 33,3 Hz + giro a mao +8 em 4 s (nao pode disparar)", nullptr, 0, 60, 0, repO, 3), 4, 4.5);
     g_moves = nullptr; g_nMoves = 0;
     g_vibDps = 0;
+
+    // P-Q: o ensaio de bancada que achou o problema da 1.6.14 — giros à mão
+    // 0 -> -30 -> +90 -> +30 -> +60 -> 0, lendo ~15 s depois de cada um —
+    // com o zero do giro andando (P: passeio aleatório; Q: aquecimento logo
+    // depois de ligar). Na 1.6.14 o bias saía do limiar de "parado" e não
+    // voltava: P leu -32/+83/+20/+45/-18 e Q passou de 40° de erro.
+    auto bench = [&](const char *id, const char *name) {
+        static const double targets[] = {-30, 90, 30, 60, 0};
+        Move mv[5];
+        double reads[5], t = 15, pos = 0;
+        for (int i = 0; i < 5; i++) {
+            double A = targets[i] - pos;
+            mv[i] = {t, std::max(0.5, fabs(A) / 45.0), A};
+            t += mv[i].T + 15;
+            reads[i] = t - 0.5;
+            pos = targets[i];
+        }
+        g_moves = mv; g_nMoves = 5;
+        Mpu6050 mpu; PanSensor pan(mpu);
+        g_now_us = 0; g_tiltDeg = 0; rng.seed(42); g_walkGy = g_walkGz = 0;
+        printf("== %s ==\n", name);
+        double truth = 0, worst = 0;
+        int r = 0;
+        for (uint32_t ms = 0; ms <= (uint32_t)(t * 1000); ms++) {
+            double ts = ms / 1000.0;
+            g_panRateDps = 0; g_tiltRateDps = 0;
+            for (int i = 0; i < 5; i++)
+                if (ts >= mv[i].t0 && ts < mv[i].t0 + mv[i].T)
+                    g_panRateDps += (mv[i].A / mv[i].T) * (1 - cos(2 * M_PI * (ts - mv[i].t0) / mv[i].T));
+            truth += g_panRateDps * 0.001;
+            g_walkGy += g_walkDps * sqrt(0.001) * unit(rng);
+            g_walkGz += g_walkDps * sqrt(0.001) * unit(rng);
+            g_now_us = (uint64_t)ms * 1000;
+            pan.update();
+            if (r < 5 && ts >= reads[r]) {
+                double p = pan.readPanDeg();
+                printf("  real %6.1f°  lido %7.2f°\n", truth, p);
+                worst = std::max(worst, fabs(p - truth));
+                r++;
+            }
+        }
+        g_moves = nullptr; g_nMoves = 0;
+        bool ok = worst <= 0.5;
+        printf("  -> %s: pior erro %.2f° (< 0,50) %s\n", id, worst, ok ? "OK" : "FALHOU");
+        if (!ok) failures++;
+    };
+    g_walkDps = 0.02;
+    bench("P", "P: bancada -30/+90/+30/+60/0, zero do giro passeando (0,02°/s/sqrt(s))");
+    g_walkDps = 0;
+    g_warmDps = 2.0; g_warmTauS = 60;
+    bench("Q", "Q: bancada -30/+90/+30/+60/0, logo depois de ligar (zero do giro +2°/s em ~1 min)");
+    g_warmDps = 0;
+
+    // R: tilt fixo em 30° e pan +40. A projeção na vertical tinha o sinal do
+    // termo de gy trocado (até a 1.6.14): a taxa saía multiplicada por
+    // cos(2·tilt) — metade a 30°, zero a 45°, sentido invertido acima disso.
+    // Os cenários acima não pegavam porque o sensor simulado tinha o mesmo
+    // sinal trocado.
+    Seg rr[] = {{5, 7, 0, 20}};
+    expect("R", run("R: tilt 30 fixo, pan +40", rr, 1, 60, 30, rep, 4), 40, 0.3);
 
     printf(failures ? "PAN: HOUVE FALHA\n" : "PAN: TUDO OK\n");
     return failures ? 1 : 0;
