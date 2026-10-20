@@ -158,6 +158,12 @@ datasheet do módulo, não de uma placa específica.
   Duas coisas para confirmar na **mesma sessão de bancada**:
   - **Compensação de tilt**: medir o mesmo movimento de pan com o tilt em
     0° e depois em ±30°/±45°: os dois têm que dar o mesmo ângulo.
+  - **Montagem do eixo X**: `python-app/tools/diagnostico_pan.py`, coluna
+    "X fora" (v1.6.17) — o ângulo do eixo X fora da horizontal. O pan usa os
+    três eixos desde a 1.6.17 e não depende disso; o tilt (`atan2(ay, az)`)
+    depende.
+  - **Sentido do tilt**: subir tem de ler positivo (`TILT_DIRECTION_SIGN`,
+    −1 desde a 1.6.17).
   - **Sentido**: giro horário visto de cima tem de ler positivo
     (`PAN_DIRECTION_SIGN = −1` em `firmware/src/Config.h`, v1.6.16; se a
     convenção do pan-tilt for a oposta, trocar para `+1`).

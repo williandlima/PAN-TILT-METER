@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.16";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10616;
+constexpr char FIRMWARE_VERSION[] = "1.6.17";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10617;
 
 // ============================================================================
 // Parâmetros Modbus RTU — devem bater com python-app/data_source/modbus_source.py
@@ -201,6 +201,14 @@ constexpr float ANGLE_MAX_DEG = 60.0f;
 // pontos se possível) se o MPU6050 físico for substituído.
 constexpr float TILT_SCALE_CORRECTION_NEG = 1.042f;  // 1 / 0,9593
 constexpr float TILT_SCALE_CORRECTION_POS = 1.066f;  // 1 / 0,9383
+
+// Sentido positivo do tilt reportado. O atan2(ay, az) cresce num sentido que
+// depende da montagem; na bancada (1.6.16), subir lia negativo: -1. Aplicado
+// só no ângulo REPORTADO (depois da calibração) — os lados NEG/POS acima
+// continuam escolhidos pelo sinal do ângulo BRUTO, que é o que a assimetria
+// do sensor segue (ver tiltScaleFor() em AngleSensor.cpp). O pan não depende
+// disto: ele usa a vertical do acelerômetro direto (PanSensor).
+constexpr float TILT_DIRECTION_SIGN = -1.0f;
 
 // ============================================================================
 // Filtro da leitura contínua (só do ângulo "normal" — o Modo Vibração NÃO
@@ -529,6 +537,12 @@ constexpr float PAN_SPIKE_REPORT_DPS = 30.0f;
 // isto é descartada como leitura falha; depois de MAX_REJECTS seguidas, a
 // referência é que está velha, e a amostra é aceita.
 constexpr float PAN_GYRO_SLEW_MAX_DPS = 100.0f;
+
+// Janela com movimento de TILT (ver closeWindow()): o giro fora da vertical
+// passa de TILT_MOVE_DPS e a vertical vista pelo acelerômetro girou pelo
+// menos TILT_MOVE_MATCH disso, no mesmo sentido.
+constexpr float PAN_TILT_MOVE_DPS = 0.5f;
+constexpr float PAN_TILT_MOVE_MATCH = 0.5f;
 constexpr uint8_t PAN_GYRO_SLEW_MAX_REJECTS = 3;
 
 // Correção do fator de escala do giroscópio (tolerância de fábrica ~+-3%).

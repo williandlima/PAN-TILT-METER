@@ -1,5 +1,6 @@
 #pragma once
 
+#include <math.h>
 #include <stdint.h>
 
 #include "Config.h"
@@ -24,12 +25,16 @@
 //    correta é a projeção do vetor de velocidade angular medido sobre a
 //    vertical escrita em coordenadas do corpo:
 //
-//        ω_pan = gz*cos(θ) + gy*sin(θ),   θ = atan2(ay, az)
+//        ω_pan = g · u,   u = a / |a|   (os três eixos do chip)
 //
-//    O acelerômetro parado mede a vertical (para cima) nos eixos do chip,
-//    (0, sin θ, cos θ), e o giro mede a velocidade angular nos MESMOS eixos;
-//    girando em torno da vertical a Ω, gy = Ω·sin θ e gz = Ω·cos θ. A fórmula
-//    é o produto escalar dos dois e não depende de como a placa foi montada.
+//    O acelerômetro parado mede a vertical (para cima) nos eixos do chip, u,
+//    e o giro mede a velocidade angular nos MESMOS eixos; girando em torno da
+//    vertical a Ω, g = Ω·u. A fórmula é o produto escalar dos dois e não
+//    depende de como a placa foi montada. Até a 1.6.16 ela usava só gy e gz
+//    (gz·cos θ + gy·sin θ, θ = atan2(ay, az)), supondo o eixo X do chip na
+//    horizontal, ao longo do eixo do tilt: com o X a φ da horizontal, a taxa
+//    saía multiplicada por cos φ. Na bancada, a posição 40 lia 28,75° —
+//    exatamente 40·cos(44°) (cenário U de sim/pan_sim.cpp).
 //    Até a 1.6.14 o termo de gy tinha o sinal trocado: a taxa saía
 //    multiplicada por cos(2θ) — 6% a menos a 10° de tilt, metade a 30°, zero
 //    a 45° e com o SENTIDO invertido acima disso. Os testes não pegavam
@@ -43,9 +48,9 @@
 //    Sendo uma projeção (produto escalar com um vetor unitário), e não a
 //    fórmula de taxa de Euler (gy*sinφ + gz*cosφ)/cosθ, não há singularidade
 //    em nenhum ângulo de tilt. E ela rejeita sozinha a taxa do próprio tilt,
-//    que acontece em torno do eixo X e portanto não tem componente na
-//    vertical. O accel e o giro vêm do mesmo burst I2C (Mpu6050::readMotion),
-//    então θ e as taxas são do mesmo instante.
+//    que acontece em torno de um eixo horizontal e portanto não tem
+//    componente na vertical. O accel e o giro vêm do mesmo burst I2C
+//    (Mpu6050::readMotion), então u e as taxas são do mesmo instante.
 //
 // 2. ZUPT (zero-rate update). Integrar giro acumula erro: um bias residual
 //    vira uma rampa. Mas o drift só corre enquanto se integra — e o eixo de
@@ -87,19 +92,21 @@
 //    são apagadas nessa hora — só a parte do bias errado sai delas
 //    (cenário T).
 //
-//    O bias é estimado POR EIXO, no referencial do sensor (gy, gz), e só
+//    O bias é estimado POR EIXO, no referencial do sensor (gx, gy, gz), e só
 //    depois projetado na vertical — nunca sobre ω_pan já projetado. O bias
-//    de fábrica é fixo nos eixos do chip; projetado, ele vale
-//    bgz·cos(θ) + bgy·sin(θ) e portanto MUDA com o tilt. Estimado sobre
+//    de fábrica é fixo nos eixos do chip; projetado, ele vale b·u e portanto
+//    MUDA com o tilt. Estimado sobre
 //    ω_pan, qualquer mudança de inclinação deixava o bias aprendido errado
 //    por alguns °/s, o gate passava a rejeitar toda janela parada (o bias
 //    nunca mais se corrigia) e esse erro era integrado sem fim até cravar a
 //    leitura em ±PAN_MAX_DEG — medido em simulação: 45° de tilt com bias de
 //    fábrica típico dava ~1,4°/s de deriva, travando em -90° em ~60 s.
-//    A distância usada no gate, hypot(Δgy, Δgz), vale exatamente |ω_pan|
-//    para uma rotação de pan em qualquer tilt, então o limiar mantém o
-//    significado de "°/s de pan". Rotação de tilt (eixo X) não aparece em
-//    gy/gz e não tira a janela da condição de parada.
+//    A distância usada no gate, |Δg| nos três eixos, vale exatamente |ω_pan|
+//    para uma rotação de pan em qualquer tilt e montagem, então o limiar
+//    mantém o significado de "°/s de pan". Um movimento de TILT também tira a
+//    janela da condição de parada (ele aparece no giro); ela é reconhecida
+//    pelo acelerômetro, que vê a vertical girar junto, e fica fora das retas
+//    de bias errado (ver closeWindow()).
 //
 // 3. CANCELAMENTO DE JANELA PARADA. Não basta parar de corrigir o bias — se a
 //    integração continuasse rodando enquanto parado, o ruído do giro viraria
@@ -157,6 +164,17 @@
 // reaprendido (nível e deriva da reta) e o que foi integrado nessas janelas
 // é desfeito. Até a 1.6.13 bastava janelas vizinhas "coerentes" a 1°/s — e
 // todo giro à mão lento e suave passava nesse teste.
+// Vetor nos eixos do chip (giro em °/s, ou direção unitária).
+struct Vec3 {
+    float x, y, z;
+};
+inline Vec3 operator+(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+inline Vec3 operator-(Vec3 a, Vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+inline Vec3 operator*(float k, Vec3 a) { return {k * a.x, k * a.y, k * a.z}; }
+inline float dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline float norm(Vec3 a) { return sqrtf(dot(a, a)); }
+inline Vec3 cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+
 class PanSensor {
 public:
     explicit PanSensor(Mpu6050 &mpu) : _mpu(mpu) {}
@@ -237,6 +255,10 @@ public:
         uint8_t biasReady;
         uint32_t spikes;    // leituras espúrias descartadas pela mediana
         uint32_t mpuRecoveries;  // reconfigurações do sensor (Mpu6050::maintain)
+        // 1.6.17+: o eixo X entrou na projeção.
+        float biasGxDps;
+        float gxDps;
+        Vec3 up;            // vertical (para cima) nos eixos do chip, unitária
     };
     Diagnostics diagnostics() const;
 
@@ -247,13 +269,12 @@ private:
     float _offsetDeg = 0.0f;  // zero da calibração
     // Bias estimado de cada eixo do giro, no referencial do sensor (°/s) —
     // ver item 2 do cabeçalho: não pode ser estimado sobre ω_pan projetado.
-    float _biasGyDps = 0.0f;
-    float _biasGzDps = 0.0f;
+    Vec3 _bias{0.0f, 0.0f, 0.0f};
     // Velocidade de deriva do bias (°/s por s), estimada nas janelas paradas.
-    float _biasSlopeGy = 0.0f;
-    float _biasSlopeGz = 0.0f;
+    Vec3 _biasSlope{0.0f, 0.0f, 0.0f};
     float _sinceStillS = 0.0f;  // tempo desde a última janela parada
     static float clampSlope(float slope);
+    static Vec3 clampSlope(Vec3 slope);
     bool _biasReady = false;  // primeira janela já definiu o bias?
     // Bias já confirmado por uma janela parada (ou adotado com a placa
     // parada de fato). Enquanto não, a rede de segurança é mais permissiva —
@@ -270,8 +291,8 @@ private:
 
     // Estado da janela de ZUPT em andamento.
     uint32_t _windowStartMs = 0;
-    float _windowGySumDps = 0.0f;
-    float _windowGzSumDps = 0.0f;
+    Vec3 _windowSum{0.0f, 0.0f, 0.0f};
+    Vec3 _windowUpStart{0.0f, 0.0f, 1.0f};  // vertical na primeira amostra da janela
     uint16_t _windowSamples = 0;
     float _windowDeltaDeg = 0.0f;  // quanto foi integrado nesta janela
     float _windowPeakDps = 0.0f;   // maior |taxa - bias| da janela (PAN_ZUPT_PEAK_DPS)
@@ -279,31 +300,30 @@ private:
     // vibração na janela (limiar adaptativo, PAN_ZUPT_VIBRATION_FACTOR).
     float _windowDiffSqSum = 0.0f;
     uint16_t _windowDiffCount = 0;
-    float _prevRawGyDps = 0.0f;
-    float _prevRawGzDps = 0.0f;
+    Vec3 _prevRaw{0.0f, 0.0f, 0.0f};
     bool _hasPrevRaw = false;
 
     // Estado do bias antes de cada uma das últimas janelas paradas, para
     // desfazer o que o começo suave de um giro ensinou a ele (ver
     // PAN_ZUPT_BIAS_UNDO_WINDOWS).
     struct BiasSnapshot {
-        float gy, gz, slopeGy, slopeGz;  // bias usado na janela (no fim dela)
-        uint32_t ms;                     // fim da janela
+        Vec3 bias, slope;  // bias usado na janela (no fim dela)
+        uint32_t ms;       // fim da janela
         float sinceStillS;
         float deltaDeg;   // integrado na janela (e cancelado)
         float signedDps;  // desvio da média, projetado na vertical
         float spreadDps;  // dispersão das amostras
         float winS;
-        float tiltRad;
-        float meanGy, meanGz;  // médias cruas da janela
+        Vec3 up;
+        Vec3 mean;  // médias cruas da janela
     };
     static constexpr int UNDO_LEN = PAN_ZUPT_BIAS_UNDO_WINDOWS;
     BiasSnapshot _undo[UNDO_LEN] = {};
     int _undoCount = 0;
-    void pushBiasUndo(uint32_t now, float winS, float signedDps, float spreadDps, float meanGy, float meanGz);
+    void pushBiasUndo(uint32_t now, float winS, float signedDps, float spreadDps, Vec3 mean);
     void undoRecentBiasLearning(uint32_t now, float winS, float motionDps);
     // Componente vertical (taxa de pan) de uma diferença de taxa nos eixos.
-    static float projectedDps(float dGy, float dGz, float tiltRad);
+    static float projectedDps(Vec3 d, Vec3 up);
     // Janela de borda (começo/fim suave) do giro de velocidade motionDps.
     static bool isEdgeOf(float edgeDps, float spreadDps, float motionDps);
 
@@ -315,13 +335,15 @@ private:
     // Janelas da excursão corrente (desde a última janela parada), para
     // reconhecer um bias que mudou com o eixo parado (PAN_ZUPT_SHIFT_*).
     struct ExcursionWindow {
-        float meanGy, meanGz;  // médias cruas
-        float deltaDeg;        // integrado (e mantido) na janela
-        float winS, tiltRad, spreadDps;
-        float devDps;          // |média - bias|
-        float biasGy, biasGz;  // bias com que a janela foi integrada (no meio dela)
-        uint32_t ms;           // fim da janela
-        bool quiet;            // sem giro de verdade (abaixo de SHIFT_MAX)
+        Vec3 mean;        // médias cruas
+        float deltaDeg;   // integrado (e mantido) na janela
+        float winS;
+        Vec3 up;
+        float spreadDps;
+        float devDps;     // |média - bias|
+        Vec3 bias;        // bias com que a janela foi integrada (no meio dela)
+        uint32_t ms;      // fim da janela
+        bool quiet;       // sem giro de verdade (abaixo de SHIFT_MAX)
     };
     static constexpr int EXC_LEN = PAN_ZUPT_SHIFT_HISTORY;
     ExcursionWindow _exc[EXC_LEN] = {};
@@ -330,44 +352,45 @@ private:
     // (PAN_ZUPT_WANDER_*), e se a janela anterior foi parada.
     float _wanderVar = 0.0f;
     bool _prevStill = false;
-    void learnWander(float stepGy, float stepGz);
+    void learnWander(Vec3 step);
     void pushExcursion(const ExcursionWindow &w);
     // Adota o bias que mudou e desfaz a deriva integrada; true se adotou.
     bool tryShiftEscape();
 
     // Média da janela anterior, para o teste de coerência (BOOT E RECUPERAÇÃO).
     bool _hasPrevMean = false;
-    float _prevMeanGyDps = 0.0f;
-    float _prevMeanGzDps = 0.0f;
+    Vec3 _prevMean{0.0f, 0.0f, 0.0f};
 
     // Últimas janelas SEGUIDAS fora do limiar de "parado" (rede de segurança
     // contra bias errado): média de cada eixo e o quanto cada uma integrou.
     static constexpr int RELEARN_LEN = PAN_BIAS_RELEARN_WINDOWS;
-    float _relearnGy[RELEARN_LEN] = {};
-    float _relearnGz[RELEARN_LEN] = {};
+    Vec3 _relearnMean[RELEARN_LEN] = {};
     float _relearnDeltaDeg[RELEARN_LEN] = {};
     float _relearnSpreadDps[RELEARN_LEN] = {};
     uint16_t _relearnCount = 0;  // janelas guardadas (<= RELEARN_LEN)
+    // Integrado nas janelas de tilt da mesma sequência: ficam fora da reta,
+    // mas o que integraram sob o bias errado também é desfeito.
+    float _relearnTiltDeg = 0.0f;
     uint16_t _relearnHead = 0;   // próxima posição de escrita
-    void pushRelearnWindow(float meanGyDps, float meanGzDps, float deltaDeg, float spreadDps);
+    void pushRelearnWindow(Vec3 mean, float deltaDeg, float spreadDps);
     // Reaprende o bias se as janelas guardadas caem sobre uma reta.
     void tryRelearn(float winS);
 
-    // Mediana móvel de gy/gz (ver "LEITURAS ESPÚRIAS" no cabeçalho).
+    // Mediana móvel do giro e da vertical (ver "LEITURAS ESPÚRIAS" no
+    // cabeçalho).
     static constexpr int PAN_DESPIKE_LEN = 5;
-    float _gyHist[PAN_DESPIKE_LEN] = {};
-    float _gzHist[PAN_DESPIKE_LEN] = {};
-    float _tiltHist[PAN_DESPIKE_LEN] = {};
+    Vec3 _gyroHist[PAN_DESPIKE_LEN] = {};
+    Vec3 _upHist[PAN_DESPIKE_LEN] = {};
     int _histCount = 0;         // amostras válidas no histórico (<= 5)
     float _pendingDtS = 0.0f;   // intervalo ainda não integrado (após buraco)
     uint32_t _spikeCount = 0;
     uint8_t _slewRejects = 0;   // amostras seguidas descartadas por salto (PAN_GYRO_SLEW_MAX_DPS)
-    // Mediana de gy, gz e tilt; false enquanto o histórico não estiver cheio.
-    bool despike(float &gyDps, float &gzDps, float &tiltRad);
+    // Mediana do giro e da vertical; false enquanto o histórico não estiver
+    // cheio.
+    bool despike(Vec3 &gyro, Vec3 &up);
 
-    float _lastGyDps = 0.0f;
-    float _lastGzDps = 0.0f;
-    float _lastTiltRad = 0.0f;
+    Vec3 _lastGyro{0.0f, 0.0f, 0.0f};
+    Vec3 _lastUp{0.0f, 0.0f, 1.0f};
     uint32_t _sampleCount = 0;
     uint32_t _i2cFailures = 0;
 
@@ -379,14 +402,14 @@ private:
 
     void resetWindow(uint32_t now);
 
-    void adoptBias(float gyDps, float gzDps, float slopeGy, float slopeGz, bool confirmed);
+    void adoptBias(Vec3 bias, Vec3 slope, bool confirmed);
     void clampIntegrator();
 
-    // Lê o sensor: gy/gz crus (°/s, sem bias subtraído) e o tilt do mesmo
-    // burst (rad). false em falha de I2C.
-    bool sampleMotion(float &gyDps, float &gzDps, float &tiltRad);
+    // Lê o sensor: giro cru (°/s, sem bias subtraído) e a vertical (unitária,
+    // para cima) do mesmo burst. false em falha de I2C.
+    bool sampleMotion(Vec3 &gyro, Vec3 &up);
 
     // Taxa de pan (°/s): bias de cada eixo subtraído no referencial do
     // sensor e só então projetado na vertical (item 1 do cabeçalho).
-    float panRateDps(float gyDps, float gzDps, float tiltRad) const;
+    float panRateDps(Vec3 gyro, Vec3 up) const;
 };

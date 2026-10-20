@@ -31,8 +31,10 @@ static double tNow() { return g_now_us / 1e6; }
 // amplitude menor — a correção do firmware restaura a amplitude verdadeira.
 static double tiltRad() {
     double trueDeg = TILT_AMP_DEG * sin(2 * M_PI * TILT_HZ * tNow());
-    double scale = trueDeg >= 0 ? TILT_SCALE_CORRECTION_POS : TILT_SCALE_CORRECTION_NEG;
-    return (trueDeg / scale) * M_PI / 180;
+    // Ângulo bruto do sensor: sentido conforme a montagem (TILT_DIRECTION_SIGN).
+    double rawDeg = TILT_DIRECTION_SIGN * trueDeg;
+    double scale = rawDeg >= 0 ? TILT_SCALE_CORRECTION_POS : TILT_SCALE_CORRECTION_NEG;
+    return (rawDeg / scale) * M_PI / 180;
 }
 bool Mpu6050::begin() { return true; }
 void Mpu6050::maintain() {}

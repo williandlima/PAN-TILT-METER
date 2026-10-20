@@ -14,7 +14,9 @@
 //
 // Eixos e sinal usados aqui (Y, Z) são um ponto de partida — a
 // confirmar/ajustar conforme a orientação real de montagem do sensor no
-// pan-tilt, quando o projeto elétrico definir isso.
+// pan-tilt, quando o projeto elétrico definir isso. O sentido reportado vem
+// de TILT_DIRECTION_SIGN (Config.h): -1 desde a 1.6.17, porque na bancada
+// subir lia negativo.
 //
 // Há TRÊS caminhos de leitura, de propósito — a mesma amostra de 100 Hz
 // alimenta os três, cada um com o filtro que a sua finalidade pede:

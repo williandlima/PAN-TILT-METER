@@ -99,8 +99,10 @@ static void dataFrame(uint8_t out[14]) {
     // recalcula seu próprio atan2 a partir do MESMO acelerômetro, sem a
     // correção, que só existe do lado do consumidor em AngleSensor.
     double t = nowS();
-    double tiltScale = T.tilt >= 0 ? TILT_SCALE_CORRECTION_POS : TILT_SCALE_CORRECTION_NEG;
-    double th = (T.tilt / tiltScale) * M_PI / 180;
+    // Ângulo bruto do sensor: sentido conforme a montagem (TILT_DIRECTION_SIGN).
+    double rawTilt = TILT_DIRECTION_SIGN * T.tilt;
+    double tiltScale = rawTilt >= 0 ? TILT_SCALE_CORRECTION_POS : TILT_SCALE_CORRECTION_NEG;
+    double th = (rawTilt / tiltScale) * M_PI / 180;
     double g[3];
     for (int i = 0; i < 3; i++) {
         g[i] = E.b0[i] + E.drift[i] * (1 - exp(-t / E.tau)) +
