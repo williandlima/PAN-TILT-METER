@@ -44,7 +44,7 @@ bool Mpu6050::readMotion(float &ax, float &ay, float &az, float &gx, float &gy, 
     // PAN_SENSOR_SCALE: sensibilidade do giroscópio ~3% abaixo do nominal
     // (ver PAN_SCALE_CORRECTION em Config.h, calibrado em bancada na 1.6.9).
     static const double PAN_SENSOR_SCALE = 1.0 / PAN_SCALE_CORRECTION;
-    double t = tiltRad(), w = PAN_AMP_DPS * PAN_SENSOR_SCALE * sin(2 * M_PI * PAN_HZ * tNow());
+    double t = tiltRad(), w = PAN_DIRECTION_SIGN * PAN_AMP_DPS * PAN_SENSOR_SCALE * sin(2 * M_PI * PAN_HZ * tNow());
     gx = nz(rng); gy = w * sin(t) + BGY + nz(rng); gz = w * cos(t) + BGZ + nz(rng);
     return true;
 }

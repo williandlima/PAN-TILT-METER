@@ -158,6 +158,9 @@ datasheet do módulo, não de uma placa específica.
   Duas coisas para confirmar na **mesma sessão de bancada**:
   - **Compensação de tilt**: medir o mesmo movimento de pan com o tilt em
     0° e depois em ±30°/±45°: os dois têm que dar o mesmo ângulo.
+  - **Sentido**: giro horário visto de cima tem de ler positivo
+    (`PAN_DIRECTION_SIGN = −1` em `firmware/src/Config.h`, v1.6.16; se a
+    convenção do pan-tilt for a oposta, trocar para `+1`).
   - **Fator de escala** (`PAN_SCALE_CORRECTION`, calibrado preliminarmente
     em 1,030 — ver "Azimute (pan) pelo giroscópio" em `firmware/README.md`):
     girar o eixo de pan entre duas posições de separação angular conhecida

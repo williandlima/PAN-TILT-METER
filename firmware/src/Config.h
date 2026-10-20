@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.15";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10615;
+constexpr char FIRMWARE_VERSION[] = "1.6.16";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10616;
 
 // ============================================================================
 // Parâmetros Modbus RTU — devem bater com python-app/data_source/modbus_source.py
@@ -401,8 +401,18 @@ constexpr uint16_t PAN_ZUPT_TAIL_MAX_WINDOWS = 10;
 // SHIFT_SLOPE_GAIN da inclinação dela: em 6 janelas metade é passeio, e
 // adotá-la inteira e extrapolá-la levou a leitura a -65° em simulação), e o
 // que foi integrado desde o começo da excursão é desfeito — por inteiro nas
-// janelas sem giro, e só a diferença de bias nas que tinham giro. Até
+// janelas sem giro, e só a parte do bias errado nas que tinham giro (e no
+// trecho lento de um giro, ver SHIFT_MOTION_*). A parte do bias em cada
+// janela vem da reta nas últimas janelas e, antes delas, de uma interpolação
+// até o começo da excursão, quando o bias ainda estava certo. Até
 // SHIFT_HISTORY janelas são lembradas.
+//
+// Na 1.6.15 as janelas "sem giro" saíam sempre inteiras — e a aproximação
+// final da marca, feita devagar à mão logo depois de um giro, também passa
+// abaixo de 2°/s: cada vez que o bias era readotado depois de um giro, ela
+// era apagada (bancada: erro de 6° somado, constante; simulado: cenário T).
+// A inclinação máxima da reta subiu de 0,04 para 0,08°/s²: um zero que
+// passeia forte chega a 0,05°/s², e um giro à mão de 16 s sobe a 0,2°/s².
 //
 // Custo: um giro à mão contínuo e muito lento — velocidade quase constante
 // abaixo de ~0,5°/s por vários segundos, ou abaixo de 1°/s por mais de 20 s
@@ -411,12 +421,19 @@ constexpr uint16_t PAN_ZUPT_TAIL_MAX_WINDOWS = 10;
 constexpr int PAN_ZUPT_SHIFT_WINDOWS = 6;
 constexpr float PAN_ZUPT_SHIFT_MAX_DPS = 2.0f;
 constexpr float PAN_ZUPT_SHIFT_RESIDUAL_DPS = 0.02f;
-constexpr float PAN_ZUPT_SHIFT_SLOPE_MAX_DPS2 = 0.04f;
+constexpr float PAN_ZUPT_SHIFT_SLOPE_MAX_DPS2 = 0.08f;
 constexpr float PAN_ZUPT_SHIFT_SLOPE_GAIN = 0.5f;
 constexpr int PAN_ZUPT_SHIFT_HISTORY = 60;
 constexpr int PAN_ZUPT_SHIFT_FORCE_WINDOWS = 20;
 constexpr float PAN_ZUPT_SHIFT_FORCE_MAX_DPS = 1.0f;
+constexpr float PAN_ZUPT_SHIFT_FORCE_RESIDUAL_DPS = 0.1f;
 constexpr float PAN_ZUPT_SHIFT_WANDER_FACTOR = 1.0f;
+// Janela sem giro a até MOTION_REACH janelas de uma janela de giro, no mesmo
+// sentido dele e mais que MOTION_BAND_DPS acima do nível do bias errado, é o
+// trecho lento do giro (aproximação final da marca, à mão): dela sai só a
+// parte do bias, não tudo. Ver tryShiftEscape().
+constexpr float PAN_ZUPT_SHIFT_MOTION_BAND_DPS = 0.1f;
+constexpr int PAN_ZUPT_SHIFT_MOTION_REACH = 3;  // janelas de distância
 
 // Limiar de "parado" adaptado à estabilidade do PRÓPRIO giro: o quanto a
 // média muda de uma janela parada para a seguinte (passeio do zero, deriva)
@@ -534,6 +551,19 @@ constexpr uint8_t PAN_GYRO_SLEW_MAX_REJECTS = 3;
 // mais afastados de zero, ex.: 45°/90°) quando possível, e sempre que o
 // MPU6050 físico desta unidade for substituído.
 constexpr float PAN_SCALE_CORRECTION = 1.030f;
+
+// Sentido positivo do pan. A projeção (item 1 de PanSensor.h) dá a rotação em
+// torno da vertical PARA CIMA pela regra da mão direita: positivo = sentido
+// ANTI-HORÁRIO visto de cima, qualquer que seja a montagem da placa. O pan do
+// usuário é positivo no sentido HORÁRIO visto de cima (como azimute de
+// bússola): -1. Medido em bancada na 1.6.15, que lia todo giro com o sinal
+// trocado. Até a 1.6.14 o sentido saía certo por acaso: o termo de gy tinha
+// o sinal errado, e com o sensor montado a mais de 45° da posição deitada
+// (atan2(ay, az) entre 45° e 135°, a placa mais "em pé" que deitada) esse
+// erro invertia o sentido de novo — com a placa deitada, as versões até a
+// 1.6.13 também liam o giro horário como negativo, como no primeiro relato
+// de bancada.
+constexpr float PAN_DIRECTION_SIGN = -1.0f;
 
 // Teto para o dt de uma única integração. Protege contra um loop que atrasou
 // muito (ou millis() dando a volta) virar um salto grande no ângulo. Não pode

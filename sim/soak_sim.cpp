@@ -111,8 +111,8 @@ static void dataFrame(uint8_t out[14]) {
     // acelerômetro acima (ver PAN_SCALE_CORRECTION em Config.h, calibrado em
     // bancada na 1.6.9).
     static const double PAN_SENSOR_SCALE = 1.0 / PAN_SCALE_CORRECTION;
-    g[1] += T.panRateF * PAN_SENSOR_SCALE * sin(th);
-    g[2] += T.panRateF * PAN_SENSOR_SCALE * cos(th);
+    g[1] += PAN_DIRECTION_SIGN * T.panRateF * PAN_SENSOR_SCALE * sin(th);
+    g[2] += PAN_DIRECTION_SIGN * T.panRateF * PAN_SENSOR_SCALE * cos(th);
     // Sensibilidade conforme o fundo de escala programado (GYRO_CONFIG): depois
     // de um reset do chip ele volta a +-250°/s até o firmware reconfigurar.
     static const double kGyroLsb[4] = {131.0, 65.5, 32.8, 16.4};  // datasheet, por FS_SEL
