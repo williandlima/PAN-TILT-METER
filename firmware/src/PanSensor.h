@@ -35,6 +35,11 @@
 //    a 45° e com o SENTIDO invertido acima disso. Os testes não pegavam
 //    porque o sensor simulado tinha o mesmo sinal trocado.
 //
+//    A projeção dá positivo no sentido ANTI-HORÁRIO visto de cima (regra da
+//    mão direita em torno da vertical para cima), qualquer que seja a
+//    montagem. O pan do usuário é positivo no sentido HORÁRIO visto de cima
+//    (PAN_DIRECTION_SIGN = -1, aplicado em projectedDps()).
+//
 //    Sendo uma projeção (produto escalar com um vetor unitário), e não a
 //    fórmula de taxa de Euler (gy*sinφ + gz*cosφ)/cosθ, não há singularidade
 //    em nenhum ângulo de tilt. E ela rejeita sozinha a taxa do próprio tilt,
@@ -77,7 +82,10 @@
 //    com médias sobre uma reta lisa, ou longas o bastante, são o eixo parado
 //    sob um bias que andou — o bias é readotado e o que elas integraram é
 //    desfeito; e o limiar sobe com o passeio medido do próprio giro.
-//    Cenários P-Q de sim/pan_sim.cpp.
+//    Cenários P-Q de sim/pan_sim.cpp. Desde a 1.6.16, as janelas lentas
+//    coladas a um giro e no sentido dele (a aproximação final da marca) não
+//    são apagadas nessa hora — só a parte do bias errado sai delas
+//    (cenário T).
 //
 //    O bias é estimado POR EIXO, no referencial do sensor (gy, gz), e só
 //    depois projetado na vertical — nunca sobre ω_pan já projetado. O bias
@@ -311,6 +319,8 @@ private:
         float deltaDeg;        // integrado (e mantido) na janela
         float winS, tiltRad, spreadDps;
         float devDps;          // |média - bias|
+        float biasGy, biasGz;  // bias com que a janela foi integrada (no meio dela)
+        uint32_t ms;           // fim da janela
         bool quiet;            // sem giro de verdade (abaixo de SHIFT_MAX)
     };
     static constexpr int EXC_LEN = PAN_ZUPT_SHIFT_HISTORY;

@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.15`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.16`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -303,7 +303,10 @@ cabeçalho do header):
    a projeção sobre a vertical escrita em coordenadas do corpo:
    `ω_pan = gz·cos(θ) + gy·sin(θ)`, com `θ` vindo do **mesmo burst I2C**
    (até a 1.6.14 o sinal do termo de `gy` estava trocado — ver "Ensaio de
-   bancada −30/+90/+30/+60/0" abaixo).
+   bancada −30/+90/+30/+60/0" abaixo). Essa projeção dá positivo no sentido
+   **anti-horário** visto de cima; o pan do usuário é positivo no sentido
+   **horário** visto de cima, por isso o firmware a multiplica por
+   `PAN_DIRECTION_SIGN = −1` (v1.6.16).
    Por ser uma projeção (produto escalar), e não a fórmula de taxa de Euler
    `(gy·sinφ + gz·cosφ)/cosθ`, não há singularidade em nenhum tilt.
 2. **ZUPT.** A cada 1s, se a **média** de `gy`/`gz` na janela estiver perto
@@ -522,6 +525,63 @@ emulado no sinal físico e com o fundo de escala do registrador): mediana
   girar em poucos segundos;
 - `PAN_SCALE_CORRECTION` (1,030) foi calibrado na 1.6.9 com o ZUPT antigo e
   o sinal trocado; refazer a calibração com giros de 90° no tilt 0°.
+
+### Sentido do pan e aproximação lenta (v1.6.16)
+
+Ensaio de bancada com a 1.6.15: **o sentido do pan saiu invertido**
+(movimento positivo lido negativo) e **sobrou um erro de ~6° somado ao longo
+dos giros**, que depois ficava constante.
+
+1. **Sentido.** A projeção corrigida na 1.6.15 dá positivo no sentido
+   anti-horário visto de cima (regra da mão direita em torno da vertical),
+   qualquer que seja a montagem; o pan do usuário é positivo no horário,
+   como azimute de bússola. Novo `PAN_DIRECTION_SIGN = −1`, aplicado em
+   `projectedDps()`, por onde passa toda conta que soma ao ângulo. A 1.6.14
+   acertava o sentido por acaso: com o sensor montado mais "em pé" que
+   deitado (`atan2(ay, az)` entre 45° e 135°), o sinal trocado de `gy`
+   invertia o sentido de novo. Cenários S1/S2 de `sim/pan_sim.cpp`: giro
+   horário de 30° com a placa deitada e em pé — 1.6.15: −30,0°; 1.6.16:
+   +30,0°.
+2. **Erro de ~6°.** Ao readotar um bias que andou (`PAN_ZUPT_SHIFT_*`, 1.6.15),
+   as janelas abaixo de 2°/s da excursão eram apagadas inteiras como deriva.
+   Mas a **aproximação final da marca**, feita devagar à mão logo depois do
+   giro, também fica abaixo de 2°/s: cada readoção depois de um giro levava
+   junto a aproximação. Agora janela lenta a até 3 janelas de um giro, no
+   mesmo sentido dele e acima do nível do bias errado, é giro — dela sai só
+   a parte do bias. A parte do bias em cada janela vem da reta ajustada no
+   fim e, antes dela, de uma interpolação até o começo da excursão (quando
+   o bias ainda estava certo), em vez de uma extrapolação da reta. Nunca sai
+   mais do que a janela integrou (no fim do curso o integrador fica preso).
+3. A readoção forçada (20 janelas abaixo de 1°/s) agora exige médias ainda
+   perto de uma reta: passos de 1° à mão a cada 2,5 s ficavam 20 s abaixo de
+   1°/s e eram apagados. A inclinação máxima da reta subiu de 0,04 para
+   0,08°/s² (um zero que passeia forte chega a 0,05°/s²).
+
+| Cenário (`sim/pan_sim.cpp`) | 1.6.15 | 1.6.16 |
+|---|---|---|
+| S1: giro horário de 30°, placa deitada | −30,0° | +30,0° |
+| S2: idem, placa em pé (tilt 90°) | −30,0° | +30,0° |
+| T: −30/+90/+30/+60/0 com os últimos 3° de cada giro em 5 s, zero passeando | pior 4,5° (volta ao zero: −4,1°) | pior 1,2° |
+
+Avaliação com 20 sementes (pior erro das 5 leituras, mediana / p90), com
+a aproximação final lenta e o zero passeando 0,02°/s/√s:
+
+| Aproximação | 1.6.15 | 1.6.16 |
+|---|---|---|
+| últimos 2° em 3 s | 2,0 / 3,0° | 0,4 / 0,9° |
+| últimos 3° em 5 s | 3,1 / 4,7° | 0,6 / 2,1° |
+| últimos 5° em 8 s | 5,3 / 9,0° | 0,9 / 5,3° |
+
+Sem a aproximação lenta, o resultado é o da 1.6.15 (comparando no mesmo
+sentido de giro: soak de 100 sementes idêntico, mediana 0,30°, p90 0,65°).
+Com o sentido novo, o soak dá mediana 0,29°, p90 0,71°, pior 1,30° — 99 de
+100 sementes dentro de 1°; a diferença é só o acaso de como a deriva cai em
+relação ao sentido dos giros.
+
+**Limite que sobra:** aproximação muito lenta com o zero do giro andando
+ainda perde parte dela (casos de 5° em 8 s, acima). Em bancada: chegar na
+marca com um giro só, sem ficar corrigindo devagar; se precisar corrigir,
+parar 2-3 s antes.
 
 ## Modo Vibração no eixo de pan (v1.3.0)
 
@@ -819,6 +879,13 @@ tela de configuração, em vez de truncar em silêncio.
   dão a vertical e a velocidade angular nos mesmos eixos, e a projeção é o
   produto escalar dos dois. Confirmar em bancada mesmo assim: o mesmo giro
   de pan com o tilt em 0° e em ±30°/±45° tem de dar o mesmo ângulo.
+- **[1.6.15 → corrigido na 1.6.16] Sentido do pan invertido.** Com o sinal
+  corrigido, a 1.6.15 lia positivo no sentido anti-horário visto de cima, e
+  o pan do usuário é positivo no horário: `PAN_DIRECTION_SIGN = −1`. A 1.6.14
+  acertava o sentido por acaso — o sinal trocado de `gy` invertia o sentido
+  de novo porque o sensor está montado a mais de 45° da posição deitada
+  (`atan2(ay, az)` entre 45° e 135°). Conferir em bancada: giro horário visto
+  de cima tem de ler positivo.
 - **[corrigido na 1.6.6] Modo Vibração via USB com uma amostra errada a cada
   32.** O bloco de amostras de tilt ocupa os input registers 31-62, que
   incluem o 40 — o da versão do firmware. Como a versão era testada antes,

@@ -27,6 +27,10 @@ static double g_vibDps = 0, g_vibHz = 0;
 // por eixo) e aquecimento (gz muda g_warmDps com constante g_warmTauS).
 static double g_walkDps = 0, g_walkGy = 0, g_walkGz = 0, g_warmDps = 0, g_warmTauS = 60;
 static std::normal_distribution<double> unit(0.0, 1.0);
+// true: g_panRateDps é o giro FÍSICO, positivo no sentido horário visto de
+// cima, convertido para os eixos do chip sem passar por PAN_DIRECTION_SIGN —
+// fixa a convenção do usuário independentemente da constante do firmware.
+static bool g_clockwiseTruth = false;
 
 bool Mpu6050::begin() { return true; }
 bool Mpu6050::readAccelG(float &ax, float &ay, float &az) {
@@ -41,8 +45,11 @@ bool Mpu6050::readMotion(float &ax, float &ay, float &az, float &gx, float &gy, 
     gx = g_tiltRateDps + BGX + noise(rng);
     double ts = g_now_us / 1e6;
     double warm = g_warmDps * (1 - exp(-ts / g_warmTauS));
-    gy = g_panRateDps * PAN_SENSOR_SCALE * sin(t) + BGY + g_walkGy + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 1.3);
-    gz =  g_panRateDps * PAN_SENSOR_SCALE * cos(t) + BGZ + g_walkGz + warm + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 4.1);
+    // Giro em torno da vertical para cima, nos eixos do chip: (0, sin t, cos t)
+    // vezes a velocidade anti-horária vista de cima.
+    const double ccw = g_clockwiseTruth ? -g_panRateDps : PAN_DIRECTION_SIGN * g_panRateDps;
+    gy = ccw * PAN_SENSOR_SCALE * sin(t) + BGY + g_walkGy + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 1.3);
+    gz =  ccw * PAN_SENSOR_SCALE * cos(t) + BGZ + g_walkGz + warm + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 4.1);
     // Uma leitura a cada 10 ms (ANGLE_SAMPLE_INTERVAL_MS).
     if (g_spikeEveryMs && ++g_readCount % (g_spikeEveryMs / 10) == 0) gz = g_spikeDps;
     return true;
@@ -189,18 +196,27 @@ int main() {
     // com o zero do giro andando (P: passeio aleatório; Q: aquecimento logo
     // depois de ligar). Na 1.6.14 o bias saía do limiar de "parado" e não
     // voltava: P leu -32/+83/+20/+45/-18 e Q passou de 40° de erro.
-    auto bench = [&](const char *id, const char *name) {
+    // approachDeg > 0: os últimos approachDeg graus de cada giro são feitos
+    // devagar, em approachS segundos — a aproximação final da marca à mão.
+    auto bench = [&](const char *id, const char *name, double approachDeg = 0, double approachS = 0, double tol = 0.5) {
         static const double targets[] = {-30, 90, 30, 60, 0};
-        Move mv[5];
+        Move mv[10];
+        int nmv = 0;
         double reads[5], t = 15, pos = 0;
         for (int i = 0; i < 5; i++) {
             double A = targets[i] - pos;
-            mv[i] = {t, std::max(0.5, fabs(A) / 45.0), A};
-            t += mv[i].T + 15;
+            double ap = approachDeg > 0 ? (A > 0 ? approachDeg : -approachDeg) : 0;
+            mv[nmv] = {t, std::max(0.5, fabs(A - ap) / 45.0), A - ap};
+            t += mv[nmv++].T;
+            if (ap != 0) {
+                mv[nmv] = {t + 0.3, approachS, ap};
+                t += 0.3 + mv[nmv++].T;
+            }
+            t += 15;
             reads[i] = t - 0.5;
             pos = targets[i];
         }
-        g_moves = mv; g_nMoves = 5;
+        g_moves = mv; g_nMoves = nmv;
         Mpu6050 mpu; PanSensor pan(mpu);
         g_now_us = 0; g_tiltDeg = 0; rng.seed(42); g_walkGy = g_walkGz = 0;
         printf("== %s ==\n", name);
@@ -209,7 +225,7 @@ int main() {
         for (uint32_t ms = 0; ms <= (uint32_t)(t * 1000); ms++) {
             double ts = ms / 1000.0;
             g_panRateDps = 0; g_tiltRateDps = 0;
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < nmv; i++)
                 if (ts >= mv[i].t0 && ts < mv[i].t0 + mv[i].T)
                     g_panRateDps += (mv[i].A / mv[i].T) * (1 - cos(2 * M_PI * (ts - mv[i].t0) / mv[i].T));
             truth += g_panRateDps * 0.001;
@@ -225,8 +241,8 @@ int main() {
             }
         }
         g_moves = nullptr; g_nMoves = 0;
-        bool ok = worst <= 0.5;
-        printf("  -> %s: pior erro %.2f° (< 0,50) %s\n", id, worst, ok ? "OK" : "FALHOU");
+        bool ok = worst <= tol;
+        printf("  -> %s: pior erro %.2f° (< %.2f) %s\n", id, worst, tol, ok ? "OK" : "FALHOU");
         if (!ok) failures++;
     };
     g_walkDps = 0.02;
@@ -243,6 +259,27 @@ int main() {
     // sinal trocado.
     Seg rr[] = {{5, 7, 0, 20}};
     expect("R", run("R: tilt 30 fixo, pan +40", rr, 1, 60, 30, rep, 4), 40, 0.3);
+
+    // S: o SENTIDO. Giro de 30° no sentido horário visto de cima tem de ler
+    // +30°, com a placa deitada (tilt 0) e em pé (tilt 90): a projeção não
+    // depende da montagem. A 1.6.15 lia -30° (bancada: "movimento positivo
+    // aparece negativo").
+    g_clockwiseTruth = true;
+    Seg ss[] = {{5, 6.5, 0, 20}};
+    expect("S1", run("S1: giro horario visto de cima, placa deitada (tilt 0)", ss, 1, 30, 0, rep, 3), 30, 0.3);
+    expect("S2", run("S2: giro horario visto de cima, placa em pe (tilt 90)", ss, 1, 30, 90, rep, 3), 30, 0.3);
+    g_clockwiseTruth = false;
+
+    // T: o mesmo ensaio de bancada, com a aproximação final de cada giro
+    // feita devagar (últimos 3° em 5 s) e o zero do giro passeando. Na 1.6.15,
+    // ao readotar um bias que andou, as janelas lentas da aproximação eram
+    // apagadas como se fossem deriva (bancada: "erro de 6 graus acumulado,
+    // constante"; aqui a 1.6.15 erra 4,5°). Com o zero passeando e a
+    // aproximação lenta, sobra cerca de 1°: parte dela é indistinguível da
+    // deriva, e no fim do curso (+90°) o integrador preso esconde a deriva.
+    g_walkDps = 0.02;
+    bench("T", "T: bancada com aproximacao final lenta (3° em 5 s), zero passeando", 3, 5, 1.5);
+    g_walkDps = 0;
 
     printf(failures ? "PAN: HOUVE FALHA\n" : "PAN: TUDO OK\n");
     return failures ? 1 : 0;
