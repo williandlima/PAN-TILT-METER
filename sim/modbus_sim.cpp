@@ -58,8 +58,12 @@ static double tNow() { return g_now_us / 1e6; }
 // Sensibilidade do acelerômetro abaixo do nominal (ver
 // TILT_SCALE_CORRECTION_NEG/_POS em Config.h): o sensor "vê" um ângulo menor
 // que o real 10°+0,5°; a correção do firmware restaura o valor verdadeiro.
-// Sempre positivo aqui (10°±0,5°), então é sempre o lado POS.
-static double tiltRad() { return ((10.0 + 0.5 * sin(2 * M_PI * 3.0 * tNow())) / TILT_SCALE_CORRECTION_POS) * M_PI / 180; }
+// O ângulo bruto tem o sinal de TILT_DIRECTION_SIGN; o lado (NEG/POS) segue ele.
+static double tiltRad() {
+    // Ângulo bruto do sensor: sentido conforme a montagem (TILT_DIRECTION_SIGN).
+    double rawDeg = TILT_DIRECTION_SIGN * (10.0 + 0.5 * sin(2 * M_PI * 3.0 * tNow()));
+    return (rawDeg / (rawDeg >= 0 ? TILT_SCALE_CORRECTION_POS : TILT_SCALE_CORRECTION_NEG)) * M_PI / 180;
+}
 bool Mpu6050::begin() { return true; }
 void Mpu6050::maintain() {}
 bool Mpu6050::readAccelG(float &ax, float &ay, float &az) {

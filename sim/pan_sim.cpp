@@ -31,10 +31,16 @@ static std::normal_distribution<double> unit(0.0, 1.0);
 // cima, convertido para os eixos do chip sem passar por PAN_DIRECTION_SIGN —
 // fixa a convenção do usuário independentemente da constante do firmware.
 static bool g_clockwiseTruth = false;
+// Montagem com o eixo X do chip fora da horizontal (graus): a vertical vira
+// (sin m, cos m·sin t, cos m·cos t). Só com o tilt parado — o eixo do tilt é
+// horizontal, então com m != 0 ele não é o X.
+static double g_mountDeg = 0;
 
 bool Mpu6050::begin() { return true; }
 bool Mpu6050::readAccelG(float &ax, float &ay, float &az) {
-    double t = g_tiltDeg * M_PI / 180; ax = 0; ay = sin(t); az = cos(t); return true;
+    double t = g_tiltDeg * M_PI / 180, m = g_mountDeg * M_PI / 180;
+    ax = sin(m); ay = cos(m) * sin(t); az = cos(m) * cos(t);
+    return true;
 }
 bool Mpu6050::readMotion(float &ax, float &ay, float &az, float &gx, float &gy, float &gz) {
     readAccelG(ax, ay, az);
@@ -42,14 +48,15 @@ bool Mpu6050::readMotion(float &ax, float &ay, float &az, float &gx, float &gy, 
     // Sensibilidade do giroscópio ~3% abaixo do nominal (ver PAN_SCALE_CORRECTION
     // em firmware/src/Config.h, calibrado em bancada na 1.6.9).
     static const double PAN_SENSOR_SCALE = 1.0 / PAN_SCALE_CORRECTION;
-    gx = g_tiltRateDps + BGX + noise(rng);
     double ts = g_now_us / 1e6;
+    const double mx = sin(g_mountDeg * M_PI / 180), myz = cos(g_mountDeg * M_PI / 180);
     double warm = g_warmDps * (1 - exp(-ts / g_warmTauS));
     // Giro em torno da vertical para cima, nos eixos do chip: (0, sin t, cos t)
     // vezes a velocidade anti-horária vista de cima.
     const double ccw = g_clockwiseTruth ? -g_panRateDps : PAN_DIRECTION_SIGN * g_panRateDps;
-    gy = ccw * PAN_SENSOR_SCALE * sin(t) + BGY + g_walkGy + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 1.3);
-    gz =  ccw * PAN_SENSOR_SCALE * cos(t) + BGZ + g_walkGz + warm + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 4.1);
+    gx = ccw * PAN_SENSOR_SCALE * mx + g_tiltRateDps + BGX + noise(rng);
+    gy = ccw * PAN_SENSOR_SCALE * myz * sin(t) + BGY + g_walkGy + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 1.3);
+    gz =  ccw * PAN_SENSOR_SCALE * myz * cos(t) + BGZ + g_walkGz + warm + noise(rng) + g_vibDps * sin(2 * M_PI * g_vibHz * ts + 4.1);
     // Uma leitura a cada 10 ms (ANGLE_SAMPLE_INTERVAL_MS).
     if (g_spikeEveryMs && ++g_readCount % (g_spikeEveryMs / 10) == 0) gz = g_spikeDps;
     return true;
@@ -269,6 +276,16 @@ int main() {
     expect("S1", run("S1: giro horario visto de cima, placa deitada (tilt 0)", ss, 1, 30, 0, rep, 3), 30, 0.3);
     expect("S2", run("S2: giro horario visto de cima, placa em pe (tilt 90)", ss, 1, 30, 90, rep, 3), 30, 0.3);
     g_clockwiseTruth = false;
+
+    // U: sensor montado com o eixo X a 44° da horizontal, giro de pan +40°.
+    // Até a 1.6.16 a projeção usava só gy/gz (supunha X horizontal) e lia
+    // 40·cos(44°) = 28,8° — o que a bancada mostrou: "posição 40 mostra
+    // 28,75". A projeção nos 3 eixos não depende da montagem.
+    g_mountDeg = 44;
+    Seg uu[] = {{5, 7, 0, 20}};
+    expect("U1", run("U1: eixo X a 44 graus da horizontal, tilt 0, pan +40", uu, 1, 40, 0, rep, 4), 40, 0.3);
+    expect("U2", run("U2: eixo X a 44 graus da horizontal, tilt 30, pan +40", uu, 1, 40, 30, rep, 4), 40, 0.3);
+    g_mountDeg = 0;
 
     // T: o mesmo ensaio de bancada, com a aproximação final de cada giro
     // feita devagar (últimos 3° em 5 s) e o zero do giro passeando. Na 1.6.15,

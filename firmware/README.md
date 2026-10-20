@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.16`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.17`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -301,7 +301,9 @@ cabeçalho do header):
    Z dele não aponta pra vertical. Pegar `gz` cru subestimaria a taxa por
    `cos(tilt)` — a 60° de tilt a leitura sairia pela metade. A taxa correta é
    a projeção sobre a vertical escrita em coordenadas do corpo:
-   `ω_pan = gz·cos(θ) + gy·sin(θ)`, com `θ` vindo do **mesmo burst I2C**
+   `ω_pan = g·u` (giro dos **três** eixos vezes a vertical unitária `u = a/|a|`
+   do acelerômetro, desde a 1.6.17; antes, `gz·cos(θ) + gy·sin(θ)`, que
+   supunha o eixo X na horizontal), com `u` vindo do **mesmo burst I2C**
    (até a 1.6.14 o sinal do termo de `gy` estava trocado — ver "Ensaio de
    bancada −30/+90/+30/+60/0" abaixo). Essa projeção dá positivo no sentido
    **anti-horário** visto de cima; o pan do usuário é positivo no sentido
@@ -582,6 +584,41 @@ relação ao sentido dos giros.
 ainda perde parte dela (casos de 5° em 8 s, acima). Em bancada: chegar na
 marca com um giro só, sem ficar corrigindo devagar; se precisar corrigir,
 parar 2-3 s antes.
+
+### Pan nos três eixos e sentido do tilt (v1.6.17)
+
+Ensaio de bancada com a 1.6.16: **o tilt lia negativo ao subir**, e **o pan
+na posição 40 mostrava 28,75°**.
+
+1. **Pan: 0,72 do real = montagem.** A projeção usava só `gy` e `gz`
+   (`gz·cos θ + gy·sin θ`, `θ = atan2(ay, az)`), supondo o eixo X do chip na
+   horizontal, ao longo do eixo do tilt. Com o X a φ da horizontal, a parte
+   do giro de pan que cai no eixo X ficava de fora: a taxa saía × cos φ, e
+   28,75/40 = cos 44°. A montagem real já tinha se mostrado diferente da
+   prevista (o sentido do pan na 1.6.16, a correção de escala do tilt de
+   4-7%). Agora a projeção é nos três eixos, `ω_pan = g·u` com
+   `u = a/|a|`, e o bias é estimado nos três — vale para qualquer montagem.
+   O cenário U de `sim/pan_sim.cpp` monta o sensor com o X a 44°: a 1.6.16 lê
+   **28,75°**, a 1.6.17 lê **40,0°**.
+2. **Movimento de tilt no ZUPT.** Com o eixo X na conta, o giro do próprio
+   tilt passa a aparecer nas janelas. Ele é reconhecido pelo acelerômetro (a
+   vertical gira junto, `(u1 × u0)/T`, explicando ao menos metade do giro
+   fora da vertical) e fica fora da reta do reaprendizado de bias (cenário G:
+   bias de boot errado e mudança de tilt no meio).
+3. **Tilt: `TILT_DIRECTION_SIGN = −1`**, aplicado só no ângulo reportado.
+   Os lados NEG/POS da correção de escala continuam escolhidos pelo sinal do
+   ângulo **bruto**, que é o que a assimetria do sensor segue.
+4. **Diagnóstico:** a characteristic de diagnóstico ganhou o eixo X e a
+   vertical (75 bytes; apps antigos leem os 55 primeiros), e
+   `python-app/tools/diagnostico_pan.py` mostra a coluna **"X fora"** — o
+   ângulo do eixo X do chip fora da horizontal. Com a placa parada, ela diz
+   na hora se a montagem é a que explica os 28,75°.
+
+Resultados: `sim/run.sh` completo OK. Soak de 100 sementes: mediana 0,34°,
+p90 0,71°, pior 1,58° — com a montagem prevista (X horizontal) o eixo X só
+acrescenta ruído e deriva à conta (comparando no mesmo sentido de tilt:
+mediana 0,29 → 0,32°, pior 1,30 → 1,37°); é o custo de valer para qualquer
+montagem.
 
 ## Modo Vibração no eixo de pan (v1.3.0)
 
@@ -879,6 +916,14 @@ tela de configuração, em vez de truncar em silêncio.
   dão a vertical e a velocidade angular nos mesmos eixos, e a projeção é o
   produto escalar dos dois. Confirmar em bancada mesmo assim: o mesmo giro
   de pan com o tilt em 0° e em ±30°/±45° tem de dar o mesmo ângulo.
+- **[1.2.0 → corrigido na 1.6.17] Pan supunha o eixo X do chip na
+  horizontal.** A projeção usava só `gy`/`gz`; com o X a φ da horizontal a
+  taxa saía × cos φ (bancada: 40 → 28,75 = 40·cos 44°). Agora são os três
+  eixos. Conferir com `python-app/tools/diagnostico_pan.py`, coluna
+  "X fora": o ângulo do eixo X fora da horizontal.
+- **[1.6.17] Sentido do tilt invertido** (subir lia negativo):
+  `TILT_DIRECTION_SIGN = −1`, só no ângulo reportado — os lados da correção
+  de escala seguem o sinal do ângulo bruto.
 - **[1.6.15 → corrigido na 1.6.16] Sentido do pan invertido.** Com o sinal
   corrigido, a 1.6.15 lia positivo no sentido anti-horário visto de cima, e
   o pan do usuário é positivo no horário: `PAN_DIRECTION_SIGN = −1`. A 1.6.14

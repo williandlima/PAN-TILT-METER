@@ -245,7 +245,11 @@ void BleServer::updatePanDiagnostics() {
         d.panDeg, d.offsetDeg, d.biasGyDps, d.biasGzDps, d.meanGyDps,
         d.meanGzDps, d.gyDps, d.gzDps, d.tiltDeg,
     };
-    uint8_t payload[55];
+    // 1.6.17+: eixo X e a vertical no fim (apps antigos leem só os 55
+    // primeiros bytes). A vertical diz como o sensor está montado: o ângulo
+    // do eixo X fora da horizontal é asin(up.x).
+    const float tail[5] = {d.biasGxDps, d.gxDps, d.up.x, d.up.y, d.up.z};
+    uint8_t payload[75];
     memcpy(payload, floats, sizeof(floats));  // ESP32 é little-endian
     memcpy(payload + 36, &d.samples, 4);
     memcpy(payload + 40, &d.i2cFailures, 4);
@@ -253,6 +257,7 @@ void BleServer::updatePanDiagnostics() {
     payload[46] = d.biasReady;
     memcpy(payload + 47, &d.spikes, 4);
     memcpy(payload + 51, &d.mpuRecoveries, 4);
+    memcpy(payload + 55, tail, sizeof(tail));
     panDiagnosticsChar->setValue(payload, sizeof(payload));
 }
 
