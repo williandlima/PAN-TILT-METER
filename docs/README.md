@@ -52,6 +52,7 @@ problemas.
 | [procedimento-instalacao-software-android.docx](procedimento-instalacao-software-android.docx) | PTI | 00 | Compilação e instalação do aplicativo Android (Kotlin/Jetpack Compose). |
 | [procedimento-gravacao-firmware.docx](procedimento-gravacao-firmware.docx) | PTG | 00 | Compilação e gravação (upload) do firmware do ESP32 via PlatformIO. |
 | [procedimento-configuracao-reset-ptu-d300e.docx](procedimento-configuracao-reset-ptu-d300e.docx) | PTC | 00 | Configuração das velocidades de reset do pan-tilt FLIR PTU-D300E (RPS e RTS em 500 posições/s) e gravação como padrão de inicialização (DS), via RS-485 com conversor USB e Docklight no Windows, com tabela de registro e resolução de problemas. |
+| [procedimento-simplificado-velocidade-ptu-d300e.docx](procedimento-simplificado-velocidade-ptu-d300e.docx) | PTC | 00 | Versão simplificada (2 páginas) do procedimento acima: RPS500, RTS500 e DS pelo Docklight, com tabela de passos e resposta esperada. |
 
 A revisão 01 do PTE (aplicativos 2.2.0) inclui, no item 4.3, a verificação
 da resolução de exibição de 0,25°/0,1° em cada eixo.
