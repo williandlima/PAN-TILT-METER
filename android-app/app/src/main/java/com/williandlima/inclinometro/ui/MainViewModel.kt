@@ -1,6 +1,7 @@
 package com.williandlima.inclinometro.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.williandlima.inclinometro.datasource.AngleDataSource
@@ -39,26 +40,21 @@ import kotlinx.coroutines.withTimeoutOrNull
  * (`_CONN_STYLES` em `python-app/ui/main_window.py`). */
 enum class ConnectionStatus { PARADO, CONECTANDO, CONECTADO, ERRO, SIMULACAO }
 
-// Exibição da leitura contínua em degraus de 0,25°, igual ao app desktop. O
-// grosso da estabilidade vem do firmware (filtro interno do MPU6050 + filtro
-// adaptativo, ver firmware/src/AngleSensor.h); aqui é só a apresentação.
-//
-// O degrau de 0,25° é requisito, e é o mesmo da versão 1 — as duas versões
-// mostram o ângulo com a mesma granularidade. O ruído do valor filtrado
-// (~0,005°) é bem menor que meio degrau, então o passo tem folga larga.
-//
-// A histerese evita o último resíduo de tremulação: sem ela, um valor parado
-// bem na fronteira entre dois degraus (ex: 1,125°) alterna entre 1,00° e
-// 1,25° a cada leitura. Nada disso afeta os dados guardados — histórico,
-// mín/máx e relatório usam sempre o ângulo bruto (`currentAngle`).
-private const val DISPLAY_ANGLE_STEP_DEG = 0.25
-private const val DISPLAY_ANGLE_HYSTERESIS_DEG = 0.05
+// Exibição da leitura contínua: degrau por eixo (0,25° padrão ou 0,1°), com
+// histerese — a regra mora em AngleDisplay.kt, a mesma do app desktop. Nada
+// disso afeta os dados guardados — histórico, mín/máx e relatório usam sempre
+// o ângulo bruto (`currentAngle`).
+
+// Onde a resolução de exibição fica guardada entre sessões.
+private const val PREFS_NAME = "inclinometro"
+private const val PREF_TILT_STEP = "exibicao_tilt_step_deg"
+private const val PREF_PAN_STEP = "exibicao_pan_step_deg"
 
 data class UiState(
     val mode: ConnectionMode = ConnectionMode.SIMULATED,
     val running: Boolean = false,
     val currentAngle: Double? = null,   // valor bruto da leitura (tilt)
-    val displayAngle: Double? = null,   // valor exibido (degrau de 0,25° com histerese)
+    val displayAngle: Double? = null,   // valor exibido (degrau do eixo com histerese)
     val minReading: AngleReading? = null,
     val maxReading: AngleReading? = null,
     val minFlash: Boolean = false,
@@ -80,9 +76,10 @@ data class UiState(
     val firmwareVersion: String? = null,
     val firmwareOutdated: Boolean = false,
     // Degrau de exibição de cada eixo (0,25° padrão; 0,1° para bancada com
-    // referência de precisão — ver Configurações). Cada eixo tem o seu.
-    val tiltDisplayStepDeg: Double = DISPLAY_ANGLE_STEP_DEG,
-    val panDisplayStepDeg: Double = DISPLAY_ANGLE_STEP_DEG,
+    // referência de precisão). Trocável no cartão de cada eixo e em
+    // Configurações, e lembrado entre sessões. Cada eixo tem o seu.
+    val tiltDisplayStepDeg: Double = AngleDisplay.DEFAULT_STEP_DEG,
+    val panDisplayStepDeg: Double = AngleDisplay.DEFAULT_STEP_DEG,
     val scanning: Boolean = false,
     val scanResults: List<BleScanner.Found> = emptyList(),
     val bleTestInProgress: Boolean = false,
@@ -104,7 +101,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val tracker = LimitTracker(LimitAxis.TILT)
     private val panTracker = LimitTracker(LimitAxis.PAN)
 
-    private val _uiState = MutableStateFlow(UiState())
+    private val prefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private val _uiState = MutableStateFlow(
+        UiState(
+            tiltDisplayStepDeg = AngleDisplay.normalize(
+                prefs.getFloat(PREF_TILT_STEP, AngleDisplay.DEFAULT_STEP_DEG.toFloat()).toDouble(),
+            ),
+            panDisplayStepDeg = AngleDisplay.normalize(
+                prefs.getFloat(PREF_PAN_STEP, AngleDisplay.DEFAULT_STEP_DEG.toFloat()).toDouble(),
+            ),
+        ),
+    )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     private var collectJob: Job? = null
@@ -261,21 +269,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Arredonda para o degrau de exibição, com histerese para não alternar
      * entre dois degraus quando o valor fica na fronteira. */
-    private fun angleForDisplay(angleDeg: Double, current: Double?, step: Double): Double {
-        if (current != null && kotlin.math.abs(angleDeg - current) < step / 2 + DISPLAY_ANGLE_HYSTERESIS_DEG) {
-            return current
-        }
-        return Math.round(angleDeg / step) * step
-    }
+    private fun angleForDisplay(angleDeg: Double, current: Double?, step: Double): Double =
+        AngleDisplay.forDisplay(angleDeg, current, step)
 
-    /** Troca a resolução de exibição da inclinação (Configurações). */
+    /**
+     * Troca a resolução de exibição da inclinação (cartão do eixo ou
+     * Configurações), grava para a próxima sessão e redesenha na hora — o
+     * valor exibido estava no degrau antigo, então a histerese recomeça.
+     */
     fun setTiltDisplayStep(stepDeg: Double) {
-        _uiState.update { it.copy(tiltDisplayStepDeg = stepDeg, displayAngle = null) }
+        val step = AngleDisplay.normalize(stepDeg)
+        prefs.edit().putFloat(PREF_TILT_STEP, step.toFloat()).apply()
+        _uiState.update {
+            it.copy(tiltDisplayStepDeg = step, displayAngle = it.currentAngle?.let { v -> angleForDisplay(v, null, step) })
+        }
     }
 
-    /** Troca a resolução de exibição do azimute (Configurações). */
+    /** Troca a resolução de exibição do azimute — ver [setTiltDisplayStep]. */
     fun setPanDisplayStep(stepDeg: Double) {
-        _uiState.update { it.copy(panDisplayStepDeg = stepDeg, displayPan = null) }
+        val step = AngleDisplay.normalize(stepDeg)
+        prefs.edit().putFloat(PREF_PAN_STEP, step.toFloat()).apply()
+        _uiState.update {
+            it.copy(panDisplayStepDeg = step, displayPan = it.currentPan?.let { v -> angleForDisplay(v, null, step) })
+        }
     }
 
     private suspend fun onReading(reading: AngleReading) {

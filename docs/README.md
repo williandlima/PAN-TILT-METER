@@ -12,7 +12,7 @@ espaçamento 1,5.
 
 | Documento | Rev. | Conteúdo |
 |---|---|---|
-| [relatorio-tecnico-inclinometro.docx](relatorio-tecnico-inclinometro.docx) | 03 | Relatório técnico do projeto: fundamentação teórica, arquitetura do sistema, cálculos e modelagem matemática, protocolos de comunicação, modos de operação e resultados/validação. |
+| [relatorio-tecnico-inclinometro.docx](relatorio-tecnico-inclinometro.docx) | 07 | Relatório técnico do projeto: fundamentação teórica, arquitetura do sistema, cálculos e modelagem matemática, protocolos de comunicação, modos de operação e resultados/validação. |
 | [lista-de-materiais-hardware.docx](lista-de-materiais-hardware.docx) | 00 | Lista de materiais (BOM): componentes, especificações técnicas, datasheets dos fabricantes, ligações elétricas do sensor e opções de alimentação em avaliação. |
 
 A revisão 01 do relatório técnico acompanha o firmware **1.4.0**: taxa de
@@ -27,7 +27,13 @@ de exibição — ver `firmware/README.md`. A revisão 03 acompanha o firmware
 eixo (o azimute travava em ±90° ao mudar a inclinação), orçamento de handles
 do serviço BLE (as características do Modo Vibração e da versão não eram
 registradas), retransmissão adaptativa, e a validação de ponta a ponta do
-Modo Vibração via BLE (`sim/run.sh`).
+Modo Vibração via BLE (`sim/run.sh`). As revisões 04 a 06 acompanham os
+ensaios de bancada do azimute (firmwares **1.6.14** a **1.6.17**): giro feito
+à mão, viés do giroscópio que muda com o eixo parado, sinal da compensação de
+tilt, sentido positivo do azimute, aproximação lenta da marca, projeção nos
+três eixos do giroscópio (independente da montagem) e sentido da inclinação.
+A revisão 07 acompanha os aplicativos **2.2.0**: resolução de exibição de
+0,1° selecionável no cartão de cada eixo e lembrada entre sessões.
 
 ## Procedimentos de teste e instalação (formulário padrão da empresa)
 
@@ -40,10 +46,13 @@ problemas.
 
 | Documento | Tipo | Rev. | Conteúdo |
 |---|---|---|---|
-| [procedimento-teste-funcional-bancada.docx](procedimento-teste-funcional-bancada.docx) | PTE | 00 | Teste funcional completo em bancada: instalação do software desktop (modo notebook), setup de teste e verificação de todos os modos de conexão e funcionalidades, com tabela de registro de resultados e resolução de problemas. |
+| [procedimento-teste-funcional-bancada.docx](procedimento-teste-funcional-bancada.docx) | PTE | 01 | Teste funcional completo em bancada: instalação do software desktop (modo notebook), setup de teste e verificação de todos os modos de conexão e funcionalidades, com tabela de registro de resultados e resolução de problemas. |
 | [procedimento-instalacao-software-python.docx](procedimento-instalacao-software-python.docx) | PTI | 00 | Instalação e verificação do software desktop (Python/PyQt5) em PC. |
 | [procedimento-instalacao-software-android.docx](procedimento-instalacao-software-android.docx) | PTI | 00 | Compilação e instalação do aplicativo Android (Kotlin/Jetpack Compose). |
 | [procedimento-gravacao-firmware.docx](procedimento-gravacao-firmware.docx) | PTG | 00 | Compilação e gravação (upload) do firmware do ESP32 via PlatformIO. |
+
+A revisão 01 do PTE (aplicativos 2.2.0) inclui, no item 4.3, a verificação
+da resolução de exibição de 0,25°/0,1° em cada eixo.
 
 Os códigos de tipo (PTE/PTI/PTG), revisão, folha, código e PN nas caixas de
 identificação são inferência própria a partir do modelo mostrado (campos

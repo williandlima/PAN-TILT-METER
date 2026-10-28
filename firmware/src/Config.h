@@ -256,8 +256,8 @@ constexpr float ANGLE_FILTER_DERIV_CUTOFF_HZ = 0.3f;
 // Caminho de MEDIDA (mín/máx, histórico e relatório) — separado do caminho de
 // TELA logo acima, e de propósito.
 //
-// O filtro da tela precisa ser pesado: o display tem passo de 0,25° e não pode
-// tremular. Só que o mesmo valor suavizado alimentava os extremos — e aí uma
+// O filtro da tela precisa ser pesado: o display tem passo de 0,25° (ou 0,1°,
+// opção de bancada dos apps 2.2.0+) e não pode tremular. Só que o mesmo valor suavizado alimentava os extremos — e aí uma
 // rajada de vento real entrava no relatório achatada. Simulação da cadeia
 // completa, rajada verdadeira de 2,0°, percentual do pico que chegava ao
 // mín/máx:

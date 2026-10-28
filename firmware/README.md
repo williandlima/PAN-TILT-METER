@@ -680,7 +680,9 @@ uma rampa real de 10°:
 Ou seja, ~3x menos ruído **e** ~3x mais rápido — não é troca.
 
 **O degrau de exibição continua em 0,25°**, o mesmo da versão 1 — é requisito,
-e mantém a comparação entre as duas versões direta. Com esse degrau a tela já
+e mantém a comparação entre as duas versões direta. (Desde os apps 2.2.0 há
+também a opção de 0,1° por eixo, para bancada — ver `python-app/README.md`;
+o ruído de 0,005° RMS continua muito abaixo de meio degrau.) Com esse degrau a tela já
 era estável com o filtro antigo (meio degrau é muito maior que o ruído), então
 o ganho do filtro novo **não aparece na estabilidade da tela**: aparece em
 duas outras coisas.
