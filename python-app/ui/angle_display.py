@@ -6,7 +6,7 @@ disso afeta os dados guardados: histórico, mín/máx e relatório usam sempre o
 ângulo bruto (0,01°).
 
 Sem Qt de propósito: a mesma regra roda no app Android
-(`android-app/.../ui/MainViewModel.kt`, `angleForDisplay`) e é testada sem
+(`android-app/.../ui/AngleDisplay.kt`, testada em `sim/AngleDisplayTest.kt`) e é testada sem
 hardware em `sim/exibicao_test.py` (ver sim/run.sh).
 """
 
