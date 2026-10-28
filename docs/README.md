@@ -14,6 +14,7 @@ espaçamento 1,5.
 |---|---|---|
 | [relatorio-tecnico-inclinometro.docx](relatorio-tecnico-inclinometro.docx) | 07 | Relatório técnico do projeto: fundamentação teórica, arquitetura do sistema, cálculos e modelagem matemática, protocolos de comunicação, modos de operação e resultados/validação. |
 | [lista-de-materiais-hardware.docx](lista-de-materiais-hardware.docx) | 00 | Lista de materiais (BOM): componentes, especificações técnicas, datasheets dos fabricantes, ligações elétricas do sensor e opções de alimentação em avaliação. |
+| [relatorio-analise-dados-reais-20261026.docx](relatorio-analise-dados-reais-20261026.docx) | 00 | Análise técnica dos dados reais do ensaio de 26/10/2026 (relatórios de leitura contínua e de Modo Vibração exportados pelo app): caminhos de filtragem, fases da leitura contínua, oscilação de 17,63 Hz no tilt (vibração linear do suporte e hipótese de aliasing a 60 Hz), estabilidade do pan, conclusões e recomendações de ensaio. |
 
 A revisão 01 do relatório técnico acompanha o firmware **1.4.0**: taxa de
 amostragem do Modo Vibração de até 500 Hz, retransmissão de amostras perdidas
