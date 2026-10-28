@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import QSettings, pyqtSignal
 from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
@@ -16,6 +16,8 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
 )
+
+from ui.angle_display import DEFAULT_DISPLAY_STEP_DEG, DISPLAY_STEPS_DEG, normalize_step, step_label
 
 try:
     from serial.tools import list_ports
@@ -30,12 +32,43 @@ class AppSettings:
     baudrate: int = 9600
     slave_id: int = 1
     ble_address: str = ""
-    # Degrau de exibição de cada eixo na tela principal. 0,25° é o padrão
-    # (evita tremulação visual); 0,1° é para bancada, comparando com uma
-    # referência de precisão (ex: nível eletrônico Mitutoyo / mesa
-    # giratória). Cada eixo tem o seu — trocar um não afeta o outro.
-    tilt_display_step_deg: float = 0.25
-    pan_display_step_deg: float = 0.25
+    # Degrau de exibição de cada eixo na tela principal (ver
+    # ui/angle_display.py). 0,25° é o padrão; 0,1° é para bancada, comparando
+    # com uma referência de precisão (ex: nível eletrônico Mitutoyo / mesa
+    # giratória). Cada eixo tem o seu — trocar um não afeta o outro. Também
+    # trocável direto no cartão de cada eixo, e lembrado entre sessões
+    # (load_display_steps/save_display_steps).
+    tilt_display_step_deg: float = DEFAULT_DISPLAY_STEP_DEG
+    pan_display_step_deg: float = DEFAULT_DISPLAY_STEP_DEG
+
+
+# Onde a resolução de exibição fica guardada entre sessões: um arquivo .ini
+# do usuário (no Windows, %APPDATA%\Avibras\Inclinometro.ini), via QSettings.
+_SETTINGS_ORG = "Avibras"
+_SETTINGS_APP = "Inclinometro"
+
+
+def _store() -> QSettings:
+    return QSettings(QSettings.IniFormat, QSettings.UserScope, _SETTINGS_ORG, _SETTINGS_APP)
+
+
+def load_display_steps(settings: AppSettings) -> AppSettings:
+    """Preenche os degraus de exibição gravados na última sessão."""
+    store = _store()
+    for key in ("tilt_display_step_deg", "pan_display_step_deg"):
+        try:
+            value = float(store.value(f"exibicao/{key}", getattr(settings, key)))
+        except (TypeError, ValueError):
+            continue
+        setattr(settings, key, normalize_step(value))
+    return settings
+
+
+def save_display_steps(settings: AppSettings) -> None:
+    store = _store()
+    store.setValue("exibicao/tilt_display_step_deg", settings.tilt_display_step_deg)
+    store.setValue("exibicao/pan_display_step_deg", settings.pan_display_step_deg)
+    store.sync()
 
 
 class SettingsDialog(QDialog):
@@ -85,18 +118,14 @@ class SettingsDialog(QDialog):
         self.slave_spin.setValue(current.slave_id)
 
         self.tilt_resolution_combo = QComboBox()
-        self.tilt_resolution_combo.addItem("0,25° (padrão)", 0.25)
-        self.tilt_resolution_combo.addItem("0,1° (bancada, referência de precisão)", 0.1)
-        idx = self.tilt_resolution_combo.findData(current.tilt_display_step_deg)
-        if idx >= 0:
-            self.tilt_resolution_combo.setCurrentIndex(idx)
-
         self.pan_resolution_combo = QComboBox()
-        self.pan_resolution_combo.addItem("0,25° (padrão)", 0.25)
-        self.pan_resolution_combo.addItem("0,1° (bancada, referência de precisão)", 0.1)
-        idx = self.pan_resolution_combo.findData(current.pan_display_step_deg)
-        if idx >= 0:
-            self.pan_resolution_combo.setCurrentIndex(idx)
+        for combo, step in ((self.tilt_resolution_combo, current.tilt_display_step_deg),
+                            (self.pan_resolution_combo, current.pan_display_step_deg)):
+            for option in DISPLAY_STEPS_DEG:
+                combo.addItem(step_label(option), option)
+            idx = combo.findData(normalize_step(step))
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
 
         self.usb_port_label = QLabel("Porta serial:")
         self.usb_baud_label = QLabel("Baud rate:")

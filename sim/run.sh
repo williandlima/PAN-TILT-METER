@@ -14,6 +14,11 @@
 #                      (~1,5 min; SKIP_MODBUS=1 pula)
 #   e2e_vibration   -> characteristics BLE registrados + Modo Vibração 500 Hz/10 s
 #                      ponta a ponta, com 0%, 5% e 30% de pacotes perdidos
+#   exibicao_test   -> resolução da tela (0,25°/0,1° por eixo): regra de
+#                      arredondamento/histerese e a janela REAL do app
+#                      desktop em Qt sem tela (offscreen); com kotlinc
+#                      disponível, a mesma regra do app Android
+#                      (AngleDisplayTest.kt) e a igualdade entre os dois
 # O mock BLE reproduz a contabilidade de handles GATT do Bluedroid
 # (default de 15 por serviço). Requer g++, python3, numpy e as dependências
 # do app (pip install -r python-app/requirements.txt: pymodbus, pyserial).
@@ -33,6 +38,17 @@ echo
 "$OUT/soak_sim" "${SOAK_SEEDS:-20}"
 echo
 python3 e2e_vibration.py "$OUT/fw_sim"
+echo
+python3 exibicao_test.py 2>/dev/null
+# Mesma regra no app Android (AngleDisplay.kt), com kotlinc puro, se houver
+# (KOTLINC=/caminho/kotlinc ou kotlinc no PATH; o SDK do Android não é preciso).
+KOTLINC=${KOTLINC:-$(command -v kotlinc || true)}
+if [ -n "$KOTLINC" ]; then
+    echo
+    "$KOTLINC" ../android-app/app/src/main/java/com/williandlima/inclinometro/ui/AngleDisplay.kt AngleDisplayTest.kt \
+        -include-runtime -d "$OUT/angle_display_test.jar" 2>/dev/null
+    java -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -jar "$OUT/angle_display_test.jar"
+fi
 if [ -z "${SKIP_MODBUS:-}" ]; then
     g++ $FLAGS modbus_sim.cpp $SRC/main.cpp $SRC/BleServer.cpp $SRC/VibrationCapture.cpp \
         $SRC/AngleSensor.cpp $SRC/PanSensor.cpp $SRC/PeakHold.cpp $SRC/ModbusSlave.cpp -o "$OUT/modbus_sim"

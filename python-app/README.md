@@ -92,12 +92,19 @@ O indicador abaixo do modo mostra o estado da conexão com o ESP32
 (conectando/conectado/falha), atualizado a cada leitura ou erro, seja via
 USB ou BLE.
 
-**Resolução de exibição**: em Configurações, o degrau padrão da tela
-(0,25°, para não tremular) pode ser trocado para 0,1° em cada eixo,
-independentemente — usado em bancada, comparando com uma referência de
-precisão (ex: nível eletrônico Mitutoyo, mesa giratória). Não muda a
-resolução do sensor nem do dado gravado no histórico/relatório (ambos já
-são de 0,01°) — só o arredondamento mostrado na tela.
+**Resolução de exibição** (app 2.2.0): cada cartão de eixo tem um seletor
+**Resolução: 0,25° / 0,1°** logo abaixo do valor — o mesmo de Configurações
+("Resolução da inclinação" / "Resolução do azimute"). 0,25° é o padrão (não
+tremula); 0,1° é para bancada, comparando com uma referência de precisão
+(ex: nível eletrônico Mitutoyo, mesa giratória). Cada eixo tem o seu, a troca
+vale na hora e a escolha é lembrada na próxima vez que o app abrir (arquivo
+`Avibras\Inclinometro.ini` na pasta de configurações do usuário). Em 0,1° o
+valor aparece com uma casa decimal (`12.3°`). A histerese que impede a tela de
+alternar entre dois degraus é proporcional ao degrau (20%): a tela fica no
+máximo 0,07° atrás da leitura em 0,1° (0,175° em 0,25°). Não muda a resolução
+do sensor nem do dado gravado no histórico/relatório (ambos já são de 0,01°) —
+só o arredondamento mostrado na tela. Regra em `ui/angle_display.py`, a mesma
+do app Android; testada em `sim/exibicao_test.py` (ver `sim/run.sh`).
 
 ## Modo Vibração
 

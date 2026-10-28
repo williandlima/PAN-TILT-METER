@@ -132,6 +132,8 @@ fun MainScreen(viewModel: MainViewModel) {
         AxisPanel(
             title = "Inclinação (tilt)",
             displayValue = state.displayAngle,
+            displayStepDeg = state.tiltDisplayStepDeg,
+            onDisplayStepChange = viewModel::setTiltDisplayStep,
             note = null,
             minValue = state.minReading?.angleDeg,
             minTimestamp = state.minReading?.timestamp,
@@ -146,6 +148,8 @@ fun MainScreen(viewModel: MainViewModel) {
         AxisPanel(
             title = "Azimute (pan)",
             displayValue = state.displayPan,
+            displayStepDeg = state.panDisplayStepDeg,
+            onDisplayStepChange = viewModel::setPanDisplayStep,
             // Deixa explícito que o eixo está sem dado, em vez de o usuário
             // achar que o azimute está travado em zero.
             note = if (state.running && !state.panAvailable) "firmware sem este eixo" else null,
@@ -417,14 +421,17 @@ private fun VibrationResultDialog(
 }
 
 /**
- * Painel de um eixo: título, valor grande em tempo real e o par de caixas de
- * mínimo/máximo. Os dois eixos usam o mesmo composable, empilhados — lado a
+ * Painel de um eixo: título, valor grande em tempo real, seletor de resolução
+ * da tela (0,25°/0,1°, o mesmo de Configurações, à mão também durante a
+ * leitura) e o par de caixas de mínimo/máximo. Os dois eixos usam o mesmo composable, empilhados — lado a
  * lado não caberia com legibilidade na largura de um celular.
  */
 @Composable
 private fun AxisPanel(
     title: String,
     displayValue: Double?,
+    displayStepDeg: Double,
+    onDisplayStepChange: (Double) -> Unit,
     note: String?,
     minValue: Double?,
     minTimestamp: Long?,
@@ -435,10 +442,17 @@ private fun AxisPanel(
 ) {
     Text(title, style = MaterialTheme.typography.titleMedium, color = Orange, fontWeight = FontWeight.Bold)
     Text(
-        text = displayValue?.let { "%.2f°".format(it) } ?: "--.--°",
+        text = displayValue?.let { AngleDisplay.format(it, displayStepDeg) } ?: "--.--°",
         style = MaterialTheme.typography.displayMedium,
         fontWeight = FontWeight.Bold,
     )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Resolução:", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        for (option in AngleDisplay.STEPS_DEG) {
+            RadioButton(selected = displayStepDeg == option, onClick = { onDisplayStepChange(option) })
+            Text(AngleDisplay.shortLabel(option), style = MaterialTheme.typography.bodySmall)
+        }
+    }
     if (note != null) {
         Text(note, style = MaterialTheme.typography.bodySmall)
     }
@@ -552,24 +566,19 @@ private fun ModeSelector(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
-        Text("Resolução da inclinação:", style = MaterialTheme.typography.bodySmall)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(selected = tiltDisplayStepDeg == 0.25, onClick = { onTiltDisplayStepChange(0.25) })
-            Text("0,25° (padrão)")
-            Spacer(Modifier.width(16.dp))
-            RadioButton(selected = tiltDisplayStepDeg == 0.1, onClick = { onTiltDisplayStepChange(0.1) })
-            Text("0,1° (bancada, referência de precisão)")
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Text("Resolução do azimute:", style = MaterialTheme.typography.bodySmall)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(selected = panDisplayStepDeg == 0.25, onClick = { onPanDisplayStepChange(0.25) })
-            Text("0,25° (padrão)")
-            Spacer(Modifier.width(16.dp))
-            RadioButton(selected = panDisplayStepDeg == 0.1, onClick = { onPanDisplayStepChange(0.1) })
-            Text("0,1° (bancada, referência de precisão)")
+        for ((label, current, onChange) in listOf(
+            Triple("Resolução da inclinação:", tiltDisplayStepDeg, onTiltDisplayStepChange),
+            Triple("Resolução do azimute:", panDisplayStepDeg, onPanDisplayStepChange),
+        )) {
+            Spacer(Modifier.height(8.dp))
+            Text(label, style = MaterialTheme.typography.bodySmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AngleDisplay.STEPS_DEG.forEachIndexed { i, option ->
+                    if (i > 0) Spacer(Modifier.width(16.dp))
+                    RadioButton(selected = current == option, onClick = { onChange(option) })
+                    Text(AngleDisplay.label(option))
+                }
+            }
         }
     }
 

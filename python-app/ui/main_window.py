@@ -9,6 +9,7 @@ import threading
 from PyQt5.QtCore import QObject, QStandardPaths, Qt, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices, QFont, QPixmap
 from PyQt5.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -31,7 +32,8 @@ from limits.history_store import HistoryStore
 from limits.limit_tracker import PAN_AXIS, TILT_AXIS, LimitTracker
 from limits.vibration_stats import analyze_axis, has_pan_samples
 from report.report_generator import generate_report, generate_vibration_report
-from ui.settings_dialog import AppSettings, SettingsDialog
+from ui.angle_display import DISPLAY_STEPS_DEG, angle_for_display, format_angle, normalize_step, short_step_label
+from ui.settings_dialog import AppSettings, SettingsDialog, load_display_steps, save_display_steps
 from ui.vibration_dialog import VibrationConfigDialog, VibrationResultDialog
 
 # Paleta Avibras Aeroco (fundo azul marinho + detalhes laranja). O logo é
@@ -57,25 +59,10 @@ def _find_logo_path() -> str | None:
 
 LOGO_PATH = _find_logo_path()
 
-# Exibição da leitura contínua em degraus de 0,25°. O grosso da estabilidade
-# vem do firmware (filtro interno do MPU6050 + filtro adaptativo, ver
-# firmware/src/AngleSensor.h); aqui é só a apresentação.
-#
-# O degrau de 0,25° é requisito, e é o mesmo da versão 1 — as duas versões
-# mostram o ângulo com a mesma granularidade, o que também torna a comparação
-# entre elas direta. Medindo a cadeia completa, o ruído do valor filtrado
-# (~0,005°) é bem menor que meio degrau, então este passo tem folga larga:
-# a leitura não tremula nem com várias vezes o ruído previsto no datasheet.
-#
-# A histerese evita o último resíduo de tremulação: sem ela, um valor parado
-# bem na fronteira entre dois degraus (ex: 1,125°) alterna entre 1,00° e 1,25°
-# a cada leitura. Só troca de degrau quando o valor passa da fronteira com
-# uma margem extra.
-#
+# Exibição da leitura contínua: degrau por eixo (0,25° padrão ou 0,1°), com
+# histerese — a regra mora em ui/angle_display.py, a mesma do app Android.
 # Nada disso afeta os dados guardados: histórico, mín/máx e relatório usam
 # sempre o ângulo bruto.
-DISPLAY_ANGLE_STEP_DEG = 0.25
-DISPLAY_ANGLE_HYSTERESIS_DEG = 0.05
 
 _VALUE_STYLE = f"font-size: 24px; font-weight: bold; color: {TEXT_LIGHT}; padding: 4px;"
 _FLASH_STYLE = f"font-size: 24px; font-weight: bold; background-color: {ORANGE}; color: {NAVY}; border-radius: 4px; padding: 4px;"
@@ -154,7 +141,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 640)
         self.setStyleSheet(_APP_STYLESHEET)
 
-        self._settings = AppSettings()
+        # A resolução de exibição de cada eixo é lembrada entre sessões.
+        self._settings = load_display_steps(AppSettings())
         self._history = HistoryStore()
         # Um rastreador de mín/máx por eixo: os extremos de inclinação e de
         # azimute são independentes.
@@ -165,8 +153,10 @@ class MainWindow(QMainWindow):
         self._firmware_warned = False
         # Pasta do último relatório salvo (ver `_ask_report_path`).
         self._report_dir: str | None = None
-        # Degrau atualmente exibido em cada eixo (histerese da exibição).
+        # Degrau atualmente exibido em cada eixo (histerese da exibição) e a
+        # última leitura bruta, para redesenhar na hora ao trocar a resolução.
         self._displayed: dict[str, float | None] = {TILT_AXIS: None, PAN_AXIS: None}
+        self._last_value: dict[str, float | None] = {TILT_AXIS: None, PAN_AXIS: None}
 
         self._bridge = _SignalBridge()
         self._bridge.reading.connect(self._on_reading)
@@ -217,8 +207,8 @@ class MainWindow(QMainWindow):
         axes_row = QHBoxLayout()
         axes_row.setSpacing(24)
         self._axis_widgets = {
-            TILT_AXIS: self._build_axis_panel("Inclinação (tilt)"),
-            PAN_AXIS: self._build_axis_panel("Azimute (pan)"),
+            TILT_AXIS: self._build_axis_panel("Inclinação (tilt)", TILT_AXIS),
+            PAN_AXIS: self._build_axis_panel("Azimute (pan)", PAN_AXIS),
         }
         axes_row.addWidget(self._axis_widgets[TILT_AXIS]["frame"], 1)
         axes_row.addWidget(self._axis_widgets[PAN_AXIS]["frame"], 1)
@@ -282,9 +272,9 @@ class MainWindow(QMainWindow):
 
         return header
 
-    def _build_axis_panel(self, title: str) -> dict:
-        """Cartão de um eixo: título, valor grande, aviso opcional e o par de
-        caixas de mínimo/máximo. Devolve os widgets num dicionário, para o
+    def _build_axis_panel(self, title: str, axis: str) -> dict:
+        """Cartão de um eixo: título, valor grande, seletor de resolução,
+        aviso opcional e o par de caixas de mínimo/máximo. Devolve os widgets num dicionário, para o
         resto da janela atualizar os dois eixos pelo mesmo caminho de código.
 
         É um QFrame (e não só um layout) de propósito: os dois eixos ficam
@@ -312,6 +302,26 @@ class MainWindow(QMainWindow):
         value_label.setFont(QFont("Sans Serif", 56, QFont.Bold))
         column.addWidget(value_label)
 
+        # Resolução da tela deste eixo, à mão no próprio cartão (a mesma opção
+        # de Configurações): 0,25° padrão ou 0,1° para bancada.
+        resolution_row = QHBoxLayout()
+        resolution_row.addStretch(1)
+        resolution_label = QLabel("Resolução:")
+        resolution_label.setStyleSheet("font-size: 13px; color: #9aa5b1; border: none;")
+        resolution_combo = QComboBox()
+        for option in DISPLAY_STEPS_DEG:
+            resolution_combo.addItem(short_step_label(option), option)
+        idx = resolution_combo.findData(self._display_step(axis))
+        if idx >= 0:
+            resolution_combo.setCurrentIndex(idx)
+        resolution_combo.currentIndexChanged.connect(
+            lambda _i, a=axis, c=resolution_combo: self._set_display_step(a, c.currentData())
+        )
+        resolution_row.addWidget(resolution_label)
+        resolution_row.addWidget(resolution_combo)
+        resolution_row.addStretch(1)
+        column.addLayout(resolution_row)
+
         # Normalmente oculto; usado para explicar por que um eixo está sem
         # valor (ex: firmware antigo, sem azimute). Fica escondido em vez de
         # só vazio porque a folha de estilo desta janela dá borda a QFrame, e
@@ -336,6 +346,7 @@ class MainWindow(QMainWindow):
         return {
             "frame": frame,
             "value": value_label,
+            "resolution": resolution_combo,
             "note": note_label,
             "min_value": min_value_label,
             "min_time": min_time_label,
@@ -426,6 +437,9 @@ class MainWindow(QMainWindow):
         if dialog.exec_() == SettingsDialog.Accepted:
             self._settings = dialog.result_settings()
             self._update_mode_label()
+            save_display_steps(self._settings)
+            for axis in (TILT_AXIS, PAN_AXIS):
+                self._sync_display_step(axis)
         if was_running:
             self._start()
 
@@ -574,19 +588,41 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.Open:
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
-    def _angle_for_display(self, axis: str, angle_deg: float) -> float:
-        """Arredonda para o degrau de exibição, com histerese para não
-        alternar entre dois degraus quando o valor fica na fronteira. Cada
-        eixo tem seu próprio estado de histerese.
+    def _display_step(self, axis: str) -> float:
+        return self._settings.tilt_display_step_deg if axis == TILT_AXIS else self._settings.pan_display_step_deg
 
-        O degrau de cada eixo é configurável (Configurações > Resolução da
-        inclinação / do azimute — ver `AppSettings.tilt_display_step_deg` /
-        `pan_display_step_deg`), para bancada com referência de precisão."""
-        step = self._settings.tilt_display_step_deg if axis == TILT_AXIS else self._settings.pan_display_step_deg
-        current = self._displayed[axis]
-        if current is None or abs(angle_deg - current) >= step / 2 + DISPLAY_ANGLE_HYSTERESIS_DEG:
-            self._displayed[axis] = round(angle_deg / step) * step
+    def _set_display_step(self, axis: str, step_deg: float) -> None:
+        """Troca a resolução da tela de um eixo (seletor do cartão ou
+        Configurações), grava para a próxima sessão e redesenha na hora."""
+        step_deg = normalize_step(step_deg)
+        if axis == TILT_AXIS:
+            self._settings.tilt_display_step_deg = step_deg
+        else:
+            self._settings.pan_display_step_deg = step_deg
+        save_display_steps(self._settings)
+        self._sync_display_step(axis)
+
+    def _sync_display_step(self, axis: str) -> None:
+        widgets = self._axis_widgets[axis]
+        combo = widgets["resolution"]
+        idx = combo.findData(self._display_step(axis))
+        if idx >= 0 and idx != combo.currentIndex():
+            combo.blockSignals(True)
+            combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+        # O valor exibido estava no degrau antigo: recomeça a histerese.
+        self._displayed[axis] = None
+        if self._last_value[axis] is not None:
+            widgets["value"].setText(self._display_text(axis, self._last_value[axis]))
+
+    def _angle_for_display(self, axis: str, angle_deg: float) -> float:
+        """Arredonda para o degrau de exibição do eixo, com histerese (ver
+        ui/angle_display.py). Cada eixo tem seu próprio estado."""
+        self._displayed[axis] = angle_for_display(angle_deg, self._displayed[axis], self._display_step(axis))
         return self._displayed[axis]
+
+    def _display_text(self, axis: str, angle_deg: float) -> str:
+        return format_angle(self._angle_for_display(axis, angle_deg), self._display_step(axis))
 
     # ------------------------------------------------------------ callbacks
     def _on_reading(self, reading: AngleReading) -> None:
@@ -608,7 +644,8 @@ class MainWindow(QMainWindow):
                 widgets["note"].setText("firmware sem este eixo")
                 widgets["note"].setVisible(True)
                 continue
-            widgets["value"].setText(f"{self._angle_for_display(axis, value):.2f}°")
+            self._last_value[axis] = value
+            widgets["value"].setText(self._display_text(axis, value))
             widgets["note"].setVisible(False)
 
             for event in self._trackers[axis].process(reading):

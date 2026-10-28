@@ -97,6 +97,17 @@ seu par de mínimo/máximo independente:
 - **Azimute (pan)**, do giroscópio integrado com ZUPT no firmware (ver
   "Azimute (pan) pelo giroscópio" em `firmware/README.md`).
 
+**Resolução de exibição** (app 2.2.0): abaixo do valor de cada eixo, o
+seletor **Resolução: 0,25° / 0,1°** — também nas configurações de conexão.
+0,25° é o padrão; 0,1° é para bancada, com referência de precisão. Cada eixo
+tem o seu, a troca vale na hora (também durante a leitura) e a escolha fica
+gravada no aparelho. Em 0,1° o valor aparece com uma casa decimal. A regra
+(degrau + histerese de 20% do degrau) está em `ui/AngleDisplay.kt`, igual à do
+app desktop (`python-app/ui/angle_display.py`); `sim/AngleDisplayTest.kt`
+confere, com `kotlinc` puro, que os dois apps mostram exatamente os mesmos
+valores. Só muda o arredondamento da tela — histórico e relatório usam sempre
+o ângulo bruto.
+
 Compatibilidade: um ESP32 com firmware anterior à v1.2.0 não tem a
 characteristic de azimute. O app detecta isso sozinho e segue funcionando só
 com a inclinação — o painel de azimute mostra `--.--°` com a nota "firmware
