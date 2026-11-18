@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.29";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10629;
+constexpr char FIRMWARE_VERSION[] = "1.6.30";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10630;
 
 // Memória permanente (NVS) e watchdog — ver main.cpp.
 constexpr char NVS_NAMESPACE[] = "inclinometro";
@@ -453,6 +453,34 @@ constexpr float PAN_ZUPT_EDGE_MIN_DPS = 0.03f;
 constexpr float PAN_ZUPT_EDGE_STEP_DPS = 0.02f;
 constexpr int PAN_ZUPT_EDGE_PRE_WINDOWS = 2;
 constexpr uint16_t PAN_ZUPT_TAIL_MAX_WINDOWS = 10;
+
+// Movimento DENTRO de uma janela "parada" (1.6.30). A janela de 1 s é julgada
+// pela média: um passo curto e rápido (5-10° em menos de 1 s, bancada de
+// 18/11/2026) deixa na janela seguinte só a frenagem final (~0,1° em 0,1 s,
+// média de 0,1°/s), ou na anterior só a partida. Abaixo do limiar, a janela
+// era dada como parada: o giro era cancelado e o bias aprendia 30% dele como
+// deriva, extrapolada depois pela inclinação. Com paradas curtas entre os
+// passos não há janela parada limpa que corrija, e o erro somava a cada
+// passo (simulação, 1.6.29: até 1,8° na volta ao zero em 30 passos de 2-12°;
+// 1.6.30: 0,3°). A janela é dividida em blocos de SUB_MS, e ela é MOVIMENTO
+// (giro mantido, bias não aprende) quando o bloco de maior giro:
+//  - passa de SUB_MOTION_DPS ou do resíduo de vibração (VIBRATION_FACTOR x
+//    dispersão medida com a 2ª diferença no eixo de pan, que não vê a
+//    rampa de aceleração do próprio giro);
+//  - ficou na janela (pelo menos SUB_NET_FRACTION dele, mesmo sentido);
+//  - concentra o giro da janela (pelo menos SUB_CONCENTRATION dela): bias
+//    errado constante se espalha igual pelos blocos e segue para o
+//    reaprendizado, como antes;
+//  - é coerente: |giro| >= SUB_COHERENCE x soma dos |incrementos|. Vibração
+//    vai e volta dentro do bloco; giro de verdade tem um sentido só.
+// Janela com buraco de amostragem fica de fora (ver closeWindow()).
+// SUB_MOTION_DPS = 0,1 já quebra o balanço do V5 (pan_sim); 0,15 e 0,2 dão o
+// mesmo resultado nos passos curtos — 0,2 tem o dobro de margem.
+constexpr uint32_t PAN_ZUPT_SUB_MS = 250;
+constexpr float PAN_ZUPT_SUB_MOTION_DPS = 0.2f;
+constexpr float PAN_ZUPT_SUB_NET_FRACTION = 0.5f;
+constexpr float PAN_ZUPT_SUB_CONCENTRATION = 0.5f;
+constexpr float PAN_ZUPT_SUB_COHERENCE = 0.6f;
 
 // Bias que MUDOU com o eixo parado (aquecimento logo depois de ligar,
 // passeio do zero do giro). Com o limiar de "parado" baixo, basta o bias

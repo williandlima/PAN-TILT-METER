@@ -347,8 +347,20 @@ private:
     // vibração na janela (limiar adaptativo, PAN_ZUPT_VIBRATION_FACTOR).
     float _windowDiffSqSum = 0.0f;
     uint16_t _windowDiffCount = 0;
+    // Blocos de PAN_ZUPT_SUB_MS dentro da janela: giro integrado no bloco
+    // corrente e o maior (com sinal) já fechado. Ver PAN_ZUPT_SUB_MOTION_DPS.
+    uint32_t _subStartMs = 0;
+    float _subDeltaDeg = 0.0f;
+    float _windowSubMaxDeg = 0.0f;
+    float _subAbsDeg = 0.0f;           // soma de |incremento| do bloco corrente
+    float _windowSubMaxAbsDeg = 0.0f;  // idem, do bloco de maior giro
+    bool _windowHadGap = false;        // buraco de amostragem nesta janela
+    void closeSubBlock();
     Vec3 _prevRaw{0.0f, 0.0f, 0.0f};
     bool _hasPrevRaw = false;
+    float _windowDiff2SqSum = 0.0f;         // idem, com a 2ª diferença no eixo de pan
+    float _prevRawAxis[2] = {0.0f, 0.0f};  // amostras brutas anteriores no eixo de pan
+    uint8_t _prevRawAxisCount = 0;
 
     // Estado do bias antes de cada uma das últimas janelas paradas, para
     // desfazer o que o começo suave de um giro ensinou a ele (ver

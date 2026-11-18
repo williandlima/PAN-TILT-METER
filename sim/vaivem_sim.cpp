@@ -114,6 +114,44 @@ int main() {
         printf("  giro contínuo de %+.0f° a %.0f°/s (%.0f s): erro %+.2f°%s\n", c[0], c[1], fabs(c[0]) / c[1], err, ok ? "" : "  FALHOU");
         if (!ok) failures++;
     }
+    // Passos CURTOS e rápidos (bancada de 18/11/2026: 5°, 10° e volta ao zero
+    // foi onde a 1.6.29 mais errou). A frenagem de um passo cai na janela
+    // seguinte como ~0,1° em 0,1 s: média abaixo do limiar, e a janela era
+    // dada como parada — o giro era cancelado e o bias aprendia a frenagem.
+    // Com paradas de ~1 s não sobra janela parada limpa para corrigir, e o
+    // erro somava a cada passo (1.6.29: -0,75° em 12 passos, aceleração de
+    // 100°/s²). Ver PAN_ZUPT_SUB_MOTION_DPS.
+    {
+        const double stops[] = {1.0, 2.0, 3.0};
+        for (double st : stops) {
+            Mpu6050 mpu; PanSensor pan(mpu);
+            uint32_t ms = 0; double truth = 0;
+            auto step = [&]() { g_now_us = (uint64_t)ms * 1000; pan.update(); ms++; };
+            RING = 0; ringT0 = -1e9; rng.seed(3);
+            for (int i = 0; i < 20000; i++) step();
+            const double p0 = pan.readPanDeg();
+            const double targets[] = {5, 10, 0, 5, 10, 0, -5, -10, 0, 10, 5, 0};
+            double worst = 0;
+            for (double target : targets) {
+                const double dir = target > truth ? 1 : -1, accel = 100, speed = 40;
+                double v = 0;
+                while (dir * (target - truth) > 1e-6) {
+                    const double rem = dir * (target - truth);
+                    v = std::min({speed, v + accel * 0.001, sqrt(2 * accel * rem)}); if (v < 0.5) v = std::min(0.5, rem / 0.001);
+                    g_panRate = dir * v; truth += g_panRate * 0.001; step();
+                }
+                g_panRate = 0; truth = target;
+                for (int i = 0; i < st * 1000; i++) step();
+                worst = std::max(worst, fabs(pan.readPanDeg() - p0 - truth));
+            }
+            for (int i = 0; i < 5000; i++) step();
+            const double fin = pan.readPanDeg() - p0;
+            const bool ok = worst < 0.25 && fabs(fin) < 0.25;
+            printf("  passos curtos 5/10° a 100°/s², paradas de %.0f s: pior %.2f°, volta ao zero %+.2f°%s\n", st, worst, fin,
+                   ok ? "" : "  FALHOU");
+            if (!ok) failures++;
+        }
+    }
     printf(failures ? "VAIVÉM: HOUVE FALHA\n" : "VAIVÉM: TUDO OK\n");
     return failures ? 1 : 0;
 }

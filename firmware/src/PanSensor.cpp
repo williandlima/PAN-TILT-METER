@@ -160,8 +160,10 @@ void PanSensor::update() {
     // uma mediana confiável — nunca com uma amostra isolada, que pode ser
     // justamente a espúria.
     if (elapsedMs > 3 * ANGLE_SAMPLE_INTERVAL_MS) {
+        _windowHadGap = true;  // fora do teste de blocos (PAN_ZUPT_SUB_MOTION_DPS)
         _histCount = 0;
         _hasPrevRaw = false;
+        _prevRawAxisCount = 0;
     }
     const Vec3 raw = gyro;
     if (!despike(gyro, up)) {
@@ -196,6 +198,12 @@ void PanSensor::update() {
         // O que foi EFETIVAMENTE aplicado (após o clamp), para o cancelamento
         // da janela desfazer exatamente isso.
         _windowDeltaDeg += _panDeg - before;
+        _subDeltaDeg += _panDeg - before;
+        _subAbsDeg += fabsf(_panDeg - before);
+        if (now - _subStartMs >= PAN_ZUPT_SUB_MS) {
+            closeSubBlock();
+            _subStartMs = now;
+        }
     }
 
     if (_windowSamples == 0) {
@@ -216,10 +224,35 @@ void PanSensor::update() {
         Vec3 off = raw - gyro;
         bool rawOk = fabsf(off.x) <= PAN_SPIKE_REPORT_DPS && fabsf(off.y) <= PAN_SPIKE_REPORT_DPS &&
                      fabsf(off.z) <= PAN_SPIKE_REPORT_DPS;
+        // Para o teste de blocos (PAN_ZUPT_SUB_MOTION_DPS), a mesma medida com
+        // a SEGUNDA diferença no eixo de pan (1.6.30): a aceleração de um giro
+        // (rampa de velocidade, ~2,5°/s por amostra a 250°/s²) entra na
+        // primeira diferença como "vibração" e subiria o limite justamente na
+        // janela que contém a partida ou a frenagem de um passo curto. A
+        // segunda diferença zera numa rampa; para ruído branco, d2²/3 tem a
+        // mesma média que d1². Fora do eixo de pan segue a primeira diferença.
+        // O limiar principal da janela continua com a medida acima.
+        const Vec3 n = panAxis(up);
+        const float rawAxis = dot(raw, n);
         if (rawOk && _hasPrevRaw) {
             Vec3 step = raw - _prevRaw;
             _windowDiffSqSum += dot(step, step);
             _windowDiffCount++;
+            const float along = dot(step, n);
+            const Vec3 perp = step - along * n;
+            float axisSq = along * along;
+            if (_prevRawAxisCount >= 2) {
+                const float d2 = rawAxis - 2.0f * _prevRawAxis[1] + _prevRawAxis[0];
+                axisSq = d2 * d2 / 3.0f;
+            }
+            _windowDiff2SqSum += dot(perp, perp) + axisSq;
+        }
+        if (!rawOk) {
+            _prevRawAxisCount = 0;
+        } else {
+            _prevRawAxis[0] = _prevRawAxis[1];
+            _prevRawAxis[1] = rawAxis;
+            if (_prevRawAxisCount < 2) _prevRawAxisCount++;
         }
         _hasPrevRaw = rawOk;
         _prevRaw = raw;
@@ -383,6 +416,29 @@ void PanSensor::closeWindow(uint32_t now) {
         }
     }
 
+    // Giro concentrado num pedaço da janela (frenagem ou partida de um passo
+    // curto): a média de 1 s o dilui abaixo do limiar. Ver
+    // PAN_ZUPT_SUB_MOTION_DPS.
+    closeSubBlock();
+    // Janela com buraco de amostragem (loop atrasado, barramento travado)
+    // fica de fora: o buraco é integrado de uma vez, com a taxa estimada nas
+    // pontas, e aparece como giro concentrado num bloco sem ser — numa
+    // janela parada, cancelá-lo (como até a 1.6.29) é o certo.
+    if (stillCandidate && !_windowHadGap) {
+        const float subS = PAN_ZUPT_SUB_MS / 1000.0f;
+        float fastVar2 = _windowDiffCount > 0 ? _windowDiff2SqSum / (2.0f * _windowDiffCount) : 0.0f;
+        float vibVar2 = fastVar2 - PAN_ZUPT_NOISE_SPREAD_DPS * PAN_ZUPT_NOISE_SPREAD_DPS;
+        float spread2Dps = vibVar2 > 0.0f ? sqrtf(vibVar2) : 0.0f;
+        const float subLimitDeg = fmaxf(PAN_ZUPT_SUB_MOTION_DPS, PAN_ZUPT_VIBRATION_FACTOR * spread2Dps) * subS;
+        if (fabsf(_windowSubMaxDeg) > subLimitDeg && _windowDeltaDeg * _windowSubMaxDeg > 0.0f &&
+            fabsf(_windowDeltaDeg) >= PAN_ZUPT_SUB_NET_FRACTION * fabsf(_windowSubMaxDeg) &&
+            fabsf(_windowSubMaxDeg) >= PAN_ZUPT_SUB_CONCENTRATION * fabsf(_windowDeltaDeg) &&
+            fabsf(_windowSubMaxDeg) >= PAN_ZUPT_SUB_COHERENCE * _windowSubMaxAbsDeg) {
+            stillCandidate = false;
+            swayStill = false;
+        }
+    }
+
     if (stillCandidate && _prevMoving && _tailWindows < PAN_ZUPT_TAIL_MAX_WINDOWS &&
         isEdgeOf(signedDps, spreadDps, _lastMovingDps)) {
         // Cauda de um giro que está freando devagar (à mão): ainda é o mesmo
@@ -455,6 +511,15 @@ void PanSensor::closeWindow(uint32_t now) {
     }
 
     resetWindow(now);
+}
+
+void PanSensor::closeSubBlock() {
+    if (fabsf(_subDeltaDeg) > fabsf(_windowSubMaxDeg)) {
+        _windowSubMaxDeg = _subDeltaDeg;
+        _windowSubMaxAbsDeg = _subAbsDeg;
+    }
+    _subDeltaDeg = 0.0f;
+    _subAbsDeg = 0.0f;
 }
 
 bool PanSensor::isEdgeOf(float edgeDps, float spreadDps, float motionDps) {
@@ -927,6 +992,13 @@ void PanSensor::resetWindow(uint32_t now) {
     _windowPeakDps = 0.0f;
     _windowDiffSqSum = 0.0f;
     _windowDiffCount = 0;
+    _windowDiff2SqSum = 0.0f;
+    _subStartMs = now;
+    _subDeltaDeg = 0.0f;
+    _subAbsDeg = 0.0f;
+    _windowSubMaxDeg = 0.0f;
+    _windowSubMaxAbsDeg = 0.0f;
+    _windowHadGap = false;
     _upHeadSum = {0.0f, 0.0f, 0.0f};
     _gyroHeadHalf = {0.0f, 0.0f, 0.0f};
 }
