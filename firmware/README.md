@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.29`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.30`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -484,6 +484,53 @@ calibração de bancada (`calibra_tilt.py`) não mudam.
 leitura da 1.6.22; (b) movimento do tilt pela PTU: sem ultrapassagem
 visível; (c) no mastro, com a viatura ligada: mín/máx mais estreitos que
 antes. Se algo piorar, `TILT_FUSION_ENABLED = false`.
+
+### Pan: passos curtos e rápidos com volta ao zero (v1.6.30)
+
+Bancada com a 1.6.29 (18/11/2026): a melhor leitura de pan até aqui, com
+poucos erros. O maior apareceu em movimentos **curtos (5°, depois 10°) e
+relativamente rápidos, voltando ao zero**. O método (giro integrado, ZUPT
+por janela de 1 s, filtro alfa-beta do bias, proteções da 1.6.29) e a escala
+(1,027) não mudam; a correção é dentro do ZUPT.
+
+- **Causa.** A janela de 1 s é julgada pela média. Um passo curto termina
+  perto do começo da janela seguinte e deixa nela só a frenagem final: cerca
+  de 0,1° em 0,1 s, ou seja, média de 0,1°/s, abaixo do limiar de "parado".
+  A janela era dada como parada: os ~0,1° eram **cancelados** e o bias
+  **aprendia 30% da frenagem** como se fosse deriva (0,03°/s), depois
+  extrapolada pela inclinação do filtro. O mesmo valia para a partida do
+  passo seguinte no fim de uma janela. Com paradas curtas entre os passos não
+  sobra janela parada limpa para corrigir, e o erro soma a cada passo, em
+  qualquer sentido. Agravante: a aceleração do próprio giro entrava na medida
+  de vibração (diferença entre amostras sucessivas) e subia o limiar
+  justamente dessa janela.
+- **Correção.** A janela é dividida em blocos de 250 ms
+  (`PAN_ZUPT_SUB_*` em `Config.h`). Ela passa a ser movimento (giro mantido,
+  bias não aprende) quando o bloco de maior giro passa de 0,2°/s (ou do
+  resíduo de vibração), o giro dele ficou na janela, concentra o giro da
+  janela e é coerente (todas as amostras no mesmo sentido). Cada condição
+  tem um motivo testado: vibração vai e volta no bloco (coerência; sem ela o
+  cenário O de vibração forte errava 13° a 20°); bias errado constante se
+  espalha igual pelos blocos (concentração); a vibração medida para esse
+  teste usa a 2ª diferença no eixo de pan, que não enxerga a rampa de
+  aceleração; e janela com buraco de amostragem fica de fora, porque o buraco
+  é integrado de uma vez e parece giro concentrado (sem isso, o custo das
+  falhas no soak subia de +0,10° para +0,46°). O limiar principal da janela
+  ficou igual ao da 1.6.29.
+- **Simulação (PanSensor real, com o filtro de 21 Hz do MPU no modelo).**
+  12 passos de 5°/10° com volta ao zero, paradas de 1 s, 100°/s²: 1.6.29
+  erra até 0,75°, 1.6.30 até 0,12°. 60 sequências aleatórias de 30 passos de
+  2-12° (10-80°/s, 50-400°/s², paradas de 0,3-4 s): volta ao zero com erro
+  médio de 0,32° e máximo de 1,79° na 1.6.29; 0,09° e 0,31° na 1.6.30. Teste
+  permanente em `sim/vaivem_sim.cpp` (a 1.6.29 falha nele). pan_sim, soak de
+  40 sementes e as demais simulações seguem iguais ou melhores (soak sem
+  falhas: média do pior erro por semente 0,566° → 0,554°).
+- **O que sobra.** Cada passo rápido perde ~1% do giro no pico de velocidade
+  (a mediana de 5 amostras corta o bico do perfil); isso se desfaz na volta
+  pelo mesmo caminho e não acumula. Não foi mexido.
+
+**Pendente em bancada:** repetir a sequência 5° → 10° → 0 rápida, com
+paradas curtas, várias vezes nos dois sentidos, e comparar com a 1.6.29.
 
 ### Pan: o limite de ±90° cortava a leitura; escala de volta a 1,027 (v1.6.28 e v1.6.29)
 
