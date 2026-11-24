@@ -354,6 +354,7 @@ private:
     float _windowSubMaxDeg = 0.0f;
     float _subAbsDeg = 0.0f;           // soma de |incremento| do bloco corrente
     float _windowSubMaxAbsDeg = 0.0f;  // idem, do bloco de maior giro
+    float _windowSubNetAbsSum = 0.0f;  // soma de |giro| de todos os blocos da janela
     bool _windowHadGap = false;        // buraco de amostragem nesta janela
     void closeSubBlock();
     Vec3 extrapolationSlope() const;

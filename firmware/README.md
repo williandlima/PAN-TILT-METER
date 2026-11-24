@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.31`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.32`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -485,6 +485,34 @@ leitura da 1.6.22; (b) movimento do tilt pela PTU: sem ultrapassagem
 visível; (c) no mastro, com a viatura ligada: mín/máx mais estreitos que
 antes. Se algo piorar, `TILT_FUSION_ENABLED = false`.
 
+### Pan: duas correções da revisão de código das versões 1.6.30 e 1.6.31 (v1.6.32)
+
+Só o pan; o tilt não foi tocado.
+
+- **Torção lenta do mastro no eixo de pan (regressão da 1.6.30).** Com o
+  PTU parado e o mastro oscilando em torno do eixo de pan a 1-2 Hz, meio
+  período cabe num bloco de 250 ms com um sentido só e passava no teste de
+  blocos: a janela parada virava "movimento", o bias parava de aprender e a
+  leitura derivava. Simulado, 0,3°/s a 1,3 Hz por 5 min: 1.6.29 0,08°,
+  1.6.31 12,6°, 1.6.32 0,08°. A janela agora também tem de ser coerente
+  entre blocos (`PAN_ZUPT_SUB_WINDOW_COHERENCE`): numa frenagem os outros
+  blocos ficam quietos; numa torção, alternam de sinal. O ganho dos passos
+  curtos se mantém (volta ao zero, 60 sequências: máximo 0,30°).
+- **Zona morta da inclinação só em giro contínuo.** Na 1.6.31 ela valia
+  também entre janelas paradas seguidas; aí o filtro alfa-beta extrapolava
+  com uma inclinação e comparava com outra, ficava neutro dentro da zona
+  morta e a estimativa parada vagava sem voltar a zero (desvio 0,000078 →
+  0,000099°/s²). Agora só vale depois de 1,5 s sem parada
+  (`PAN_BIAS_DEADBAND_AFTER_S`): parado, o filtro é o mesmo da 1.6.30
+  (desvio de volta a 0,000078°/s²), e a varredura longa mantém o ganho
+  (80 s: pior caso 0,62° na 1.6.30, 0,44° na 1.6.32).
+- **Testes** em `sim/vaivem_sim.cpp`: torção a 1,3 e 1,7 Hz (a 1.6.31 falha
+  com 9,4° e 1,1°). Suíte inteira passa.
+- **Fraqueza anterior, não corrigida:** torção do mastro no eixo de pan de
+  1°/s ou mais, abaixo de ~2,5 Hz, já derivava na 1.6.29 (7-70° em 5 min
+  simulados): a média de 1 s não zera e o pico passa do limite de "parado".
+  Se o mastro real tiver essa torção, é um trabalho à parte.
+
 ### Pan: giro longo sem parada, como a varredura do reset do PTU (v1.6.31)
 
 Bancada com a 1.6.30 (24/11/2026): passos de 10°, 20° e 30° exatos (+10,0,
@@ -503,8 +531,9 @@ semana perderam 0,0° a 0,1°. Só o pan; o tilt voltou a 0,0 em todas.
 - **Correção.** Zona morta suave na inclinação projetada durante o
   movimento (`PAN_BIAS_SLOPE_DEADBAND_DPS2` = 0,0002°/s², 2,5 desvios):
   abaixo dela não se projeta nada; acima, só o excedente. A inclinação
-  guardada e toda a lógica das janelas (ZUPT, desfazer, reaprender) não
-  mudam — a diferença nas contas internas fica abaixo de 0,0001°/s.
+  guardada não muda. (Correção na 1.6.32: aplicada também entre janelas
+  paradas, a zona morta deixava o filtro alfa-beta neutro dentro dela — ver
+  a seção da 1.6.32.)
   Aquecimento real que importa (0,5 a 3°/s em minutos) passa de 0,001°/s² e
   continua sendo acompanhado: resultados idênticos aos da 1.6.30 nesses
   casos.
