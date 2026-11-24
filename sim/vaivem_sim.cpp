@@ -190,6 +190,31 @@ int main() {
                ok ? "" : "  FALHOU");
         if (!ok) failures++;
     }
+    // Torção lenta do mastro no eixo de pan, PTU parado (0,3°/s a 1,3 e 1,7
+    // Hz por 5 min). Meio período cabe num bloco de 250 ms com um sentido só;
+    // na 1.6.30/1.6.31 o teste de blocos tomava essas janelas por movimento,
+    // o bias parava de aprender e a leitura derivava 4-12°. A 1.6.29 ficava em
+    // 0,08°. Ver PAN_ZUPT_SUB_WINDOW_COHERENCE.
+    for (double f : {1.3, 1.7}) {
+        double worst = 0;
+        for (int sd = 1; sd <= 3; sd++) {
+            Mpu6050 mpu; PanSensor pan(mpu);
+            uint32_t ms = 0; double truth = 0;
+            auto step = [&]() { g_now_us = (uint64_t)ms * 1000; pan.update(); ms++; };
+            RING = 0; ringT0 = -1e9; rng.seed(200 + sd);
+            for (int i = 0; i < 60000; i++) step();
+            const double p0 = pan.readPanDeg();
+            for (int i = 0; i < 300000; i++) {
+                g_panRate = 0.3 * sin(2 * M_PI * f * i / 1000.0 + 0.7 * sd);
+                truth += g_panRate * 0.001; step();
+                if (i % 1000 == 0) worst = std::max(worst, fabs(pan.readPanDeg() - p0 - truth));
+            }
+            g_panRate = 0;
+        }
+        const bool ok = worst < 0.3;
+        printf("  torção do mastro 0,3°/s a %.1f Hz, PTU parado 5 min: pior %.2f°%s\n", f, worst, ok ? "" : "  FALHOU");
+        if (!ok) failures++;
+    }
     printf(failures ? "VAIVÉM: HOUVE FALHA\n" : "VAIVÉM: TUDO OK\n");
     return failures ? 1 : 0;
 }

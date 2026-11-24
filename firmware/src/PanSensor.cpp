@@ -433,7 +433,8 @@ void PanSensor::closeWindow(uint32_t now) {
         if (fabsf(_windowSubMaxDeg) > subLimitDeg && _windowDeltaDeg * _windowSubMaxDeg > 0.0f &&
             fabsf(_windowDeltaDeg) >= PAN_ZUPT_SUB_NET_FRACTION * fabsf(_windowSubMaxDeg) &&
             fabsf(_windowSubMaxDeg) >= PAN_ZUPT_SUB_CONCENTRATION * fabsf(_windowDeltaDeg) &&
-            fabsf(_windowSubMaxDeg) >= PAN_ZUPT_SUB_COHERENCE * _windowSubMaxAbsDeg) {
+            fabsf(_windowSubMaxDeg) >= PAN_ZUPT_SUB_COHERENCE * _windowSubMaxAbsDeg &&
+            fabsf(_windowDeltaDeg) >= PAN_ZUPT_SUB_WINDOW_COHERENCE * _windowSubNetAbsSum) {
             stillCandidate = false;
             swayStill = false;
         }
@@ -519,6 +520,14 @@ Vec3 PanSensor::extrapolationSlope() const {
     // ela não é deriva, e projetá-la por até 30 s de giro só somava erro.
     // Acima, segue descontada da zona morta — aquecimento forte continua
     // sendo acompanhado. A inclinação guardada não muda.
+    // Só em giro contínuo (mais de uma janela desde a última parada): entre
+    // janelas paradas seguidas, o filtro alfa-beta tem de extrapolar com a
+    // MESMA inclinação que usa para comparar (midBias); com a zona morta ali
+    // (1.6.31) ele ficava neutro dentro dela, e a estimativa vagava sem
+    // voltar a zero (desvio parado 0,000078 -> 0,000099°/s²).
+    if (_sinceStillS < PAN_BIAS_DEADBAND_AFTER_S) {
+        return _biasSlope;
+    }
     auto shrink = [](float v) {
         const float d = PAN_BIAS_SLOPE_DEADBAND_DPS2;
         return v > d ? v - d : (v < -d ? v + d : 0.0f);
@@ -527,6 +536,7 @@ Vec3 PanSensor::extrapolationSlope() const {
 }
 
 void PanSensor::closeSubBlock() {
+    _windowSubNetAbsSum += fabsf(_subDeltaDeg);
     if (fabsf(_subDeltaDeg) > fabsf(_windowSubMaxDeg)) {
         _windowSubMaxDeg = _subDeltaDeg;
         _windowSubMaxAbsDeg = _subAbsDeg;
@@ -1011,6 +1021,7 @@ void PanSensor::resetWindow(uint32_t now) {
     _subAbsDeg = 0.0f;
     _windowSubMaxDeg = 0.0f;
     _windowSubMaxAbsDeg = 0.0f;
+    _windowSubNetAbsSum = 0.0f;
     _windowHadGap = false;
     _upHeadSum = {0.0f, 0.0f, 0.0f};
     _gyroHeadHalf = {0.0f, 0.0f, 0.0f};

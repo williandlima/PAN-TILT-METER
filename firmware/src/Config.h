@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.31";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10631;
+constexpr char FIRMWARE_VERSION[] = "1.6.32";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10632;
 
 // Memória permanente (NVS) e watchdog — ver main.cpp.
 constexpr char NVS_NAMESPACE[] = "inclinometro";
@@ -473,6 +473,12 @@ constexpr uint16_t PAN_ZUPT_TAIL_MAX_WINDOWS = 10;
 //    reaprendizado, como antes;
 //  - é coerente: |giro| >= SUB_COHERENCE x soma dos |incrementos|. Vibração
 //    vai e volta dentro do bloco; giro de verdade tem um sentido só.
+//  - e a janela também é coerente entre blocos (1.6.32): |giro da janela| >=
+//    SUB_WINDOW_COHERENCE x soma dos |giro| de cada bloco. Na frenagem os
+//    outros blocos ficam quietos; numa torção lenta do mastro no eixo de pan
+//    (1-2 Hz), meio período cabe num bloco com um sentido só e passava nos
+//    testes acima, mas os blocos alternam de sinal. Sem isto (1.6.30/1.6.31),
+//    0,3°/s a 1,3 Hz com o PTU parado derivava 12° em 5 min (1.6.29: 0,08°).
 // Janela com buraco de amostragem fica de fora (ver closeWindow()).
 // SUB_MOTION_DPS = 0,1 já quebra o balanço do V5 (pan_sim); 0,15 e 0,2 dão o
 // mesmo resultado nos passos curtos — 0,2 tem o dobro de margem.
@@ -481,6 +487,7 @@ constexpr float PAN_ZUPT_SUB_MOTION_DPS = 0.2f;
 constexpr float PAN_ZUPT_SUB_NET_FRACTION = 0.5f;
 constexpr float PAN_ZUPT_SUB_CONCENTRATION = 0.5f;
 constexpr float PAN_ZUPT_SUB_COHERENCE = 0.6f;
+constexpr float PAN_ZUPT_SUB_WINDOW_COHERENCE = 0.7f;
 
 // Bias que MUDOU com o eixo parado (aquecimento logo depois de ligar,
 // passeio do zero do giro). Com o limiar de "parado" baixo, basta o bias
@@ -597,6 +604,11 @@ constexpr float PAN_BIAS_EXTRAPOLATION_MAX_S = 30.0f;
 // da perda. Aquecimento real que importa passa de 0,001°/s². 2,5 desvios:
 // abaixo disso a inclinação não é projetada; acima, só o excedente.
 constexpr float PAN_BIAS_SLOPE_DEADBAND_DPS2 = 0.0002f;
+// A zona morta só vale depois disto de movimento contínuo (1.6.32): mais de
+// uma janela sem parada. Entre janelas paradas a inclinação é usada inteira,
+// como até a 1.6.30 — senão o filtro alfa-beta perdia a força que traz a
+// estimativa de volta a zero.
+constexpr float PAN_BIAS_DEADBAND_AFTER_S = 1.5f;
 
 // Rede de segurança contra bias errado (ver "BOOT E RECUPERAÇÃO" em
 // PanSensor.h): quantas janelas SEGUIDAS fora do limiar de "parado", com
