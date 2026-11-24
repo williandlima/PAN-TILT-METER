@@ -357,6 +357,21 @@ private:
     float _windowSubNetAbsSum = 0.0f;  // soma de |giro| de todos os blocos da janela
     bool _windowHadGap = false;        // buraco de amostragem nesta janela
     void closeSubBlock();
+    // Detector de tranco (PAN_SHOCK_*): saltos grandes nas últimas amostras.
+    uint8_t _shockBits = 0;
+    uint32_t _shockUntilMs = 0;
+    uint32_t _shockSamplesTotal = 0;
+    bool _wasInShock = false;
+    bool _shockReplayPending = false;
+    struct ShockRec { uint32_t ms; float rate; float applied; bool accepted; bool usable; };
+    static constexpr int SHOCK_REC_LEN = 10;
+    ShockRec _shockRec[SHOCK_REC_LEN] = {};
+    int _shockRecHead = 0;
+    int _shockRecCount = 0;
+    void pushShockRec(uint32_t ms, Vec3 gyroRaw, Vec3 up, bool usable);
+    Vec3 _prevReadGyro{0.0f, 0.0f, 0.0f};
+    bool _hasPrevRead = false;
+    float shockReplay();
     Vec3 extrapolationSlope() const;
     Vec3 _prevRaw{0.0f, 0.0f, 0.0f};
     bool _hasPrevRaw = false;

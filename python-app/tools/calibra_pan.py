@@ -26,7 +26,7 @@ Entrada: CSV (";" ou ",") com uma linha por giro:
 Faça giros grandes (±45° a ±90°; até a 1.6.27 a leitura saturava em ±90°) nos DOIS sentidos e em vários tilts (ex.:
 −30°, 0°, 30°, 60°): giro pequeno mede mal a escala — foi o problema dos 2
 pontos de 8°/9°. Informe com --fw-* as constantes que o firmware tinha
-durante as medidas (padrão: as da 1.6.28 a 1.6.32, 1,027/0/0/0). A versão da placa aparece no app
+durante as medidas (padrão: as da 1.6.28 a 1.6.33, 1,027/0/0/0). A versão da placa aparece no app
 ("Testar conexão"); com dados de outra versão, passe as constantes DELA: 1.6.25 = 1,0487;
 1.6.26 = 1,0466 e assimetria −0,0059; 1.6.27 = 1,0425; até a 1.6.24 = 1,030.
 

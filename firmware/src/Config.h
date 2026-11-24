@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.32";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10632;
+constexpr char FIRMWARE_VERSION[] = "1.6.33";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10633;
 
 // Memória permanente (NVS) e watchdog — ver main.cpp.
 constexpr char NVS_NAMESPACE[] = "inclinometro";
@@ -676,6 +676,38 @@ constexpr float PAN_GYRO_SLEW_MAX_DPS = 100.0f;
 constexpr float PAN_TILT_MOVE_DPS = 0.5f;
 constexpr float PAN_TILT_MOVE_MATCH = 0.5f;
 constexpr uint8_t PAN_GYRO_SLEW_MAX_REJECTS = 3;
+
+// TRANCO DO MOTOR (1.6.33). Na partida e na parada do motor de passo do PTU
+// a placa balança numa ressonância mecânica (captura de vibração de
+// 24/11/2026: o acelerômetro chega a ver o tilt saltar 180°). O pan real não
+// se move, mas o giro oscila forte por alguns décimos de segundo, e duas
+// proteções contra leitura espúria estragavam a integral justamente aí: o
+// limitador de salto descartava amostras reais (subamostrando a oscilação)
+// e a mediana de 5 a retificava num desvio de sinal fixo. Bancada: degraus de
+// 0,03-0,14° no pan a cada partida/parada do tilt, 0,3-0,6° por sessão, com
+// sinal variando de sessão para sessão. Simulado (oscilação de 30-180 Hz,
+// 30-300°/s, posição voltando ao ponto de partida, filtro de 21 Hz do MPU):
+// 4 trancos davam RMS 0,74° e pior 4,8°; integrando a amostra crua com o
+// limite de salto alto durante o tranco, RMS 0,05° e pior 0,27°.
+// Tranco = pelo menos MIN_HITS das últimas WINDOW_SAMPLES leituras com salto
+// (entre leituras consecutivas) acima de JUMP_DPS e abaixo de SLEW_MAX_DPS; o
+// modo dura HOLD_MS depois da última detecção. Lixo do barramento (1 a 3
+// quadros) dá no máximo 4 saltos e quase sempre acima de SLEW_MAX; giro
+// feito à mão ou pelo PTU muda menos de 8°/s por amostra. Ao entrar em
+// tranco, as últimas leituras guardadas (SHOCK_REC_LEN em PanSensor.h) são
+// reintegradas cruas — a parte mais forte do balanço é o começo, antes de o
+// detector ter certeza. Oscilação acima de ~80 Hz chega dobrada (aliasing a
+// 100 Hz de amostragem) e não tem correção sem mudar o filtro do MPU, que é
+// o mesmo do tilt.
+constexpr float PAN_SHOCK_JUMP_DPS = 8.0f;
+constexpr int PAN_SHOCK_WINDOW_SAMPLES = 8;
+constexpr int PAN_SHOCK_MIN_HITS = 5;
+constexpr uint32_t PAN_SHOCK_HOLD_MS = 150;
+constexpr float PAN_SHOCK_SLEW_MAX_DPS = 700.0f;
+// Replay só com assinatura de balanço (ver PanSensor::shockReplay()).
+constexpr int PAN_SHOCK_MIN_SIGN_CHANGES = 1;
+constexpr float PAN_SHOCK_MAX_RATE_DPS = 500.0f;
+constexpr float PAN_SHOCK_MAX_REPLAY_DEG = 2.5f;
 
 // Desacoplamento do tilt (1.6.19 — item 5 de PanSensor.h). Com a viatura fora
 // do nível, o eixo de pan sai da vertical e o eixo do tilt deixa de ser
