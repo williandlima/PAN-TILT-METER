@@ -148,6 +148,17 @@ por evento, na coluna **"Medido por"**). O eixo de tempo dos gráficos conta a
 partir do início da aquisição, em s, min ou h conforme a duração. Cálculo em
 `report/acquisition.py`; testes em `sim/relatorio_test.py`.
 
+## Modo Vibração: CSV das amostras (app 2.4.1)
+
+Na janela de resultado da captura, **Salvar CSV...** grava uma linha por
+amostra (separador `;`, vírgula decimal, abre direto no Excel): tempo, ângulo
+de tilt (acelerômetro, sem filtro de movimento), **taxa crua do pan (°/s)** e
+a integral pura dela, sem remover tendência. O relatório PDF continua com o
+pan sem tendência (bom para ver oscilação), mas isso transforma um degrau em
+duas rampas; para diagnosticar trancos do motor do PTU (o pan andando na
+partida e na parada do tilt), use o CSV. A janela não fecha ao salvar o CSV:
+dá para salvar o PDF em seguida.
+
 ## Histórico: prazo de retenção (app 2.4.0)
 
 O app grava cada leitura (~4 por segundo) num banco SQLite na pasta de dados

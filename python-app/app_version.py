@@ -21,7 +21,7 @@ import os
 import sys
 from pathlib import Path
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.4.1"
 
 # Nome exibido na janela principal (título e cabeçalho da tela).
 #

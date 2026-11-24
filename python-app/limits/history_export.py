@@ -50,3 +50,40 @@ def export_session_csv(
                 _num(r.pan_deg),
             ])
     return len(readings)
+
+
+def export_vibration_csv(path: str, readings: list["AngleReading"], rate_hz: float, info: str = "") -> int:
+    """Grava as amostras de uma captura do Modo Vibração e devolve quantas.
+
+    Uma linha por amostra, com as GRANDEZAS CRUAS que o firmware enviou: o
+    ângulo de tilt (acelerômetro, sem filtro de movimento) e a velocidade
+    angular do pan (°/s), além da integral pura dela (sem remover tendência). A taxa crua é a que
+    interessa para diagnóstico (trancos, vibração do motor): o ângulo
+    integrado esconde se um degrau é oscilação ou giro de verdade.
+    """
+    t0 = readings[0].timestamp if readings else 0.0
+    # Integral PURA da taxa (trapézio), sem tirar a tendência: o pan_deg das
+    # amostras vem com a reta removida (bom para o relatório de vibração),
+    # mas isso transforma um degrau em duas rampas e esconde justamente o
+    # que o diagnóstico procura.
+    integ: list[float | None] = []
+    acc, prev = 0.0, None
+    for r in readings:
+        if r.pan_rate_dps is None:
+            integ.append(None)
+            continue
+        if prev is not None:
+            acc += 0.5 * (prev + r.pan_rate_dps) / rate_hz
+        prev = r.pan_rate_dps
+        integ.append(acc)
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        f.write("# Inclinometro - captura do Modo Vibracao\n")
+        f.write(f"# taxa: {_num(rate_hz, 1)} Hz; amostras: {len(readings)}\n")
+        if info:
+            f.write(f"# {info}\n")
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["amostra", "t_s", "tilt_graus", "pan_taxa_graus_s", "pan_integrado_graus"])
+        for i, r in enumerate(readings):
+            w.writerow([i, _num(r.timestamp - t0, 4), _num(r.angle_deg, 2), _num(r.pan_rate_dps, 2),
+                        _num(integ[i], 4)])
+    return len(readings)

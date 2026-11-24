@@ -335,6 +335,29 @@ try:
 except Exception as exc:  # noqa: BLE001
     check("relatório de vibração continua gerando", False, repr(exc))
 
+# CSV da captura de vibração (botão "Salvar CSV..."): amostras cruas, com a
+# TAXA do pan (°/s) — é ela que mostra se um degrau é oscilação ou giro real.
+try:
+    from data_source.base import build_vibration_readings
+    from limits.history_export import export_vibration_csv
+
+    rates = [0.0] * 50 + [100.0] * 10 + [0.0] * 40  # 10 amostras a 100°/s em 100 Hz = 10°
+    caps = build_vibration_readings([0.5] * 100, rates, 100.0, T0)
+    cpath = os.path.join(TMP, "captura.csv")
+    n = export_vibration_csv(cpath, caps, 100.0, "firmware: 1.6.32")
+    linhas = open(cpath, encoding="utf-8-sig").read().splitlines()
+    dados = [l for l in linhas if not l.startswith("#")]
+    check("CSV de vibração: uma linha por amostra + cabeçalho", n == 100 and len(dados) == 101, f"{len(dados)} linhas")
+    check("CSV de vibração: colunas e vírgula decimal",
+          dados[0] == "amostra;t_s;tilt_graus;pan_taxa_graus_s;pan_integrado_graus" and dados[56].split(";")[3] == "100,00",
+          dados[56])
+    check("CSV de vibração: integral pura da taxa (sem tirar tendência)", abs(float(dados[-1].split(";")[4].replace(",", ".")) - 10.0) < 0.01,
+          dados[-1])
+    check("CSV de vibração: cabeçalho com taxa e firmware",
+          linhas[1].startswith("# taxa: 100,0 Hz; amostras: 100") and "firmware: 1.6.32" in linhas[2], linhas[1])
+except Exception as exc:  # noqa: BLE001
+    check("CSV de vibração", False, repr(exc))
+
 # ---------------------------------------------------------------------------
 print("=== janela principal: aquisição com tempo programado (Qt offscreen) ===")
 try:

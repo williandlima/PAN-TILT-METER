@@ -29,7 +29,7 @@ from data_source.base import MIN_RECOMMENDED_FIRMWARE, AngleReading, IAngleDataS
 from data_source.ble_source import BleAngleSource
 from data_source.modbus_source import ModbusAngleSource
 from data_source.simulated_source import SimulatedAngleSource
-from limits.history_export import export_session_csv
+from limits.history_export import export_session_csv, export_vibration_csv
 from limits.history_store import HistoryStore
 from limits.limit_tracker import PAN_AXIS, TILT_AXIS, LimitTracker
 from limits.vibration_stats import analyze_axis, has_pan_samples
@@ -1072,7 +1072,12 @@ class MainWindow(QMainWindow):
         pan = analyze_axis(readings, rate_hz, PAN_AXIS) if has_pan_samples(readings) else None
         self.statusBar().showMessage("Captura de vibração concluída.", 5000)
 
-        result_dialog = VibrationResultDialog(tilt.stats, pan.stats if pan else None, self)
+        result_dialog = VibrationResultDialog(
+            tilt.stats,
+            pan.stats if pan else None,
+            self,
+            on_save_csv=lambda: self._save_vibration_csv(readings, rate_hz),
+        )
         result_dialog.exec_()
         if not result_dialog.save_requested:
             return
@@ -1090,6 +1095,24 @@ class MainWindow(QMainWindow):
             return
 
         self._report_saved(path)
+
+    def _save_vibration_csv(self, readings: list, rate_hz: float) -> None:
+        folder = self._report_dir or QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        name = f"captura_vibracao_{_dt.datetime.now():%Y%m%d_%H%M%S}.csv"
+        path, _ = QFileDialog.getSaveFileName(self, "Salvar captura em CSV", os.path.join(folder, name), "CSV (*.csv)")
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        fw = getattr(self._source, "firmware_version", None) if self._source is not None else None
+        info = f"firmware: {fw}" if fw else ""
+        try:
+            n = export_vibration_csv(path, readings, rate_hz, info)
+        except OSError as exc:
+            QMessageBox.critical(self, "Erro ao salvar CSV", str(exc))
+            return
+        self._report_dir = os.path.dirname(path)
+        self.statusBar().showMessage(f"CSV salvo ({n} amostras): {path}", 8000)
 
     def _flash(self, label: QLabel) -> None:
         label.setStyleSheet(_FLASH_STYLE)
