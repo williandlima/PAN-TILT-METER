@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.30`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.31`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -484,6 +484,38 @@ calibração de bancada (`calibra_tilt.py`) não mudam.
 leitura da 1.6.22; (b) movimento do tilt pela PTU: sem ultrapassagem
 visível; (c) no mastro, com a viatura ligada: mín/máx mais estreitos que
 antes. Se algo piorar, `TILT_FUSION_ENABLED = false`.
+
+### Pan: giro longo sem parada, como a varredura do reset do PTU (v1.6.31)
+
+Bancada com a 1.6.30 (24/11/2026): passos de 10°, 20° e 30° exatos (+10,0,
++20,0, +30,0 a partir da leitura anterior), mas um reset (R) do PTU, que
+varre o pan de limite a limite sem parar, perdeu 1,1°. Outras R na mesma
+semana perderam 0,0° a 0,1°. Só o pan; o tilt voltou a 0,0 em todas.
+
+- **Causa.** Durante um giro contínuo não há janela parada para medir o
+  bias; o firmware projeta o último nível e a inclinação (deriva por
+  segundo) aprendidos, por até 30 s. Parado, a estimativa da inclinação tem
+  ruído de ~0,00008°/s² (desvio-padrão, simulado com o ruído do MPU6050), e
+  projetá-la por 30 s cria um bias falso que se integra durante todo o giro:
+  na varredura simulada de 80 s, ±0,29° de variação e 0,62° no pior caso, a
+  maior parte por esse motivo. O resto é o ruído do próprio nível (limite
+  físico de um giroscópio MEMS sem parada).
+- **Correção.** Zona morta suave na inclinação projetada durante o
+  movimento (`PAN_BIAS_SLOPE_DEADBAND_DPS2` = 0,0002°/s², 2,5 desvios):
+  abaixo dela não se projeta nada; acima, só o excedente. A inclinação
+  guardada e toda a lógica das janelas (ZUPT, desfazer, reaprender) não
+  mudam — a diferença nas contas internas fica abaixo de 0,0001°/s.
+  Aquecimento real que importa (0,5 a 3°/s em minutos) passa de 0,001°/s² e
+  continua sendo acompanhado: resultados idênticos aos da 1.6.30 nesses
+  casos.
+- **Simulação.** Varredura de ±160° com sensor estável: 43 s, pior caso
+  0,32° → 0,22°; 80 s, 0,62° → 0,40° (desvio 0,29° → 0,18°). Teste
+  permanente em `sim/vaivem_sim.cpp` (RMS em 12 sementes: 1.6.30 0,26°,
+  1.6.31 0,18°, limite 0,22°). Suíte inteira passa; os demais cenários mudam
+  em centésimos de grau.
+- **Limite físico.** Mesmo assim, giro contínuo longo acumula alguns
+  décimos de grau por minuto sem parada. Depois de um giro longo (como o R),
+  uma parada de 2-3 s deixa o firmware voltar a medir o bias.
 
 ### Pan: passos curtos e rápidos com volta ao zero (v1.6.30)
 

@@ -356,6 +356,7 @@ private:
     float _windowSubMaxAbsDeg = 0.0f;  // idem, do bloco de maior giro
     bool _windowHadGap = false;        // buraco de amostragem nesta janela
     void closeSubBlock();
+    Vec3 extrapolationSlope() const;
     Vec3 _prevRaw{0.0f, 0.0f, 0.0f};
     bool _hasPrevRaw = false;
     float _windowDiff2SqSum = 0.0f;         // idem, com a 2ª diferença no eixo de pan
