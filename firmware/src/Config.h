@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.30";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10630;
+constexpr char FIRMWARE_VERSION[] = "1.6.31";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10631;
 
 // Memória permanente (NVS) e watchdog — ver main.cpp.
 constexpr char NVS_NAMESPACE[] = "inclinometro";
@@ -589,6 +589,14 @@ constexpr float PAN_ZUPT_BIAS_ALPHA = 0.3f;
 constexpr float PAN_ZUPT_SLOPE_BETA = 0.01f;
 constexpr float PAN_BIAS_SLOPE_MAX_DPS2 = 0.015f;
 constexpr float PAN_BIAS_EXTRAPOLATION_MAX_S = 30.0f;
+// Zona morta da inclinação projetada durante o movimento (1.6.31). Parado,
+// o ruído da estimativa da inclinação é ~0,00008°/s² (desvio-padrão,
+// simulação com o ruído do MPU6050); projetada por até 30 s de giro
+// contínuo, essa ilusão de deriva virava erro de ângulo — na varredura do
+// reset do PTU (pan de limite a limite, 40-80 s sem parar) era a maior parte
+// da perda. Aquecimento real que importa passa de 0,001°/s². 2,5 desvios:
+// abaixo disso a inclinação não é projetada; acima, só o excedente.
+constexpr float PAN_BIAS_SLOPE_DEADBAND_DPS2 = 0.0002f;
 
 // Rede de segurança contra bias errado (ver "BOOT E RECUPERAÇÃO" em
 // PanSensor.h): quantas janelas SEGUIDAS fora do limiar de "parado", com

@@ -152,6 +152,44 @@ int main() {
             if (!ok) failures++;
         }
     }
+    // Varredura do reset (R) do PTU: pan de limite a limite e de volta, sem
+    // parar (~80 s a 8°/s), depois de 5 min parado. Sem parada não há como
+    // corrigir o bias; o erro vem do que se projeta dele. Até a 1.6.30 a
+    // inclinação estimada (ruído ~0,00008°/s²) era projetada inteira por 30 s
+    // e dominava a perda (bancada de 24/11/2026: um R perdeu 1,1°). Ver
+    // PAN_BIAS_SLOPE_DEADBAND_DPS2. Estatístico: RMS em 12 sementes.
+    {
+        double sum2 = 0, worst = 0;
+        const int N = 12;
+        for (int sd = 1; sd <= N; sd++) {
+            Mpu6050 mpu; PanSensor pan(mpu);
+            uint32_t ms = 0; double truth = 0;
+            auto step = [&]() { g_now_us = (uint64_t)ms * 1000; pan.update(); ms++; };
+            RING = 0; ringT0 = -1e9; rng.seed(100 + sd);
+            for (int i = 0; i < 300000; i++) step();
+            const double p0 = pan.readPanDeg();
+            auto sweep = [&](double target) {
+                const double dir = target > truth ? 1 : -1, accel = 100, speed = 8;
+                double v = 0;
+                while (dir * (target - truth) > 1e-6) {
+                    const double rem = dir * (target - truth);
+                    v = std::min({speed, v + accel * 0.001, sqrt(2 * accel * rem)}); if (v < 0.5) v = std::min(0.5, rem / 0.001);
+                    g_panRate = dir * v; truth += g_panRate * 0.001; step();
+                }
+                g_panRate = 0; truth = target;
+                for (int i = 0; i < 300; i++) step();
+            };
+            sweep(160); sweep(-160); sweep(0);
+            for (int i = 0; i < 10000; i++) step();
+            const double e = pan.readPanDeg() - p0;
+            sum2 += e * e; worst = std::max(worst, fabs(e));
+        }
+        const double rms = sqrt(sum2 / N);
+        const bool ok = rms < 0.22;
+        printf("  varredura do reset (±160° a 8°/s, 80 s sem parar): RMS %.2f°, pior %.2f° (limite RMS 0,22°)%s\n", rms, worst,
+               ok ? "" : "  FALHOU");
+        if (!ok) failures++;
+    }
     printf(failures ? "VAIVÉM: HOUVE FALHA\n" : "VAIVÉM: TUDO OK\n");
     return failures ? 1 : 0;
 }

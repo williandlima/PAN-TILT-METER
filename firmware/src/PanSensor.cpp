@@ -179,7 +179,7 @@ void PanSensor::update() {
         // Deriva térmica do bias continua durante o movimento, quando não
         // há janela parada para corrigi-lo: segue a velocidade estimada.
         // Só por um tempo limitado — a estimativa envelhece.
-        _bias = _bias + dtS * _biasSlope;
+        _bias = _bias + dtS * extrapolationSlope();
         _sinceStillS += dtS;
     }
 
@@ -511,6 +511,19 @@ void PanSensor::closeWindow(uint32_t now) {
     }
 
     resetWindow(now);
+}
+
+Vec3 PanSensor::extrapolationSlope() const {
+    // Zona morta suave na inclinação projetada (1.6.31, ver
+    // PAN_BIAS_SLOPE_DEADBAND_DPS2): abaixo do ruído da própria estimativa
+    // ela não é deriva, e projetá-la por até 30 s de giro só somava erro.
+    // Acima, segue descontada da zona morta — aquecimento forte continua
+    // sendo acompanhado. A inclinação guardada não muda.
+    auto shrink = [](float v) {
+        const float d = PAN_BIAS_SLOPE_DEADBAND_DPS2;
+        return v > d ? v - d : (v < -d ? v + d : 0.0f);
+    };
+    return {shrink(_biasSlope.x), shrink(_biasSlope.y), shrink(_biasSlope.z)};
 }
 
 void PanSensor::closeSubBlock() {
