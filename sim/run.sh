@@ -9,6 +9,8 @@
 #                      horas e em movimento constante por 30 min
 #   vaivem_sim      -> pan: vaivém rápido de ±30° com paradas curtas e volta
 #                      ao zero
+#   tranco_sim      -> pan: trancos do motor de passo do PTU (balanço de média
+#                      zero com o filtro de 21 Hz do MPU), 1.6.33
 #   nvs_sim         -> zero do tilt salvo na memória permanente (calibra,
 #                      "desliga e religa" e confere) e watchdog do loop
 #   soak_sim        -> firmware inteiro (com o driver I2C real) por 30 min
@@ -58,6 +60,9 @@ g++ $FLAGS regime_sim.cpp $SRC/AngleSensor.cpp $SRC/PanSensor.cpp $SRC/PeakHold.
 echo
 g++ $FLAGS vaivem_sim.cpp $SRC/PanSensor.cpp $SRC/PeakHold.cpp -o "$OUT/vaivem_sim"
 "$OUT/vaivem_sim"
+echo
+g++ $FLAGS tranco_sim.cpp $SRC/PanSensor.cpp $SRC/PeakHold.cpp -o "$OUT/tranco_sim"
+"$OUT/tranco_sim"
 echo
 g++ $FLAGS nvs_sim.cpp $SRC/main.cpp $SRC/BleServer.cpp $SRC/VibrationCapture.cpp \
     $SRC/AngleSensor.cpp $SRC/PanSensor.cpp $SRC/PeakHold.cpp $SRC/ModbusSlave.cpp -o "$OUT/nvs_sim"

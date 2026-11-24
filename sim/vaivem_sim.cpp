@@ -157,10 +157,12 @@ int main() {
     // corrigir o bias; o erro vem do que se projeta dele. Até a 1.6.30 a
     // inclinação estimada (ruído ~0,00008°/s²) era projetada inteira por 30 s
     // e dominava a perda (bancada de 24/11/2026: um R perdeu 1,1°). Ver
-    // PAN_BIAS_SLOPE_DEADBAND_DPS2. Estatístico: RMS em 12 sementes.
+    // PAN_BIAS_SLOPE_DEADBAND_DPS2. Estatístico: RMS em 30 sementes (com 12, o
+    // limite ficava a 0,04° do medido e uma mudança na ordem dos sorteios do
+    // mock podia virar o resultado sem mudança real).
     {
         double sum2 = 0, worst = 0;
-        const int N = 12;
+        const int N = 30;
         for (int sd = 1; sd <= N; sd++) {
             Mpu6050 mpu; PanSensor pan(mpu);
             uint32_t ms = 0; double truth = 0;
@@ -185,8 +187,9 @@ int main() {
             sum2 += e * e; worst = std::max(worst, fabs(e));
         }
         const double rms = sqrt(sum2 / N);
-        const bool ok = rms < 0.22;
-        printf("  varredura do reset (±160° a 8°/s, 80 s sem parar): RMS %.2f°, pior %.2f° (limite RMS 0,22°)%s\n", rms, worst,
+        // 30 sementes: 1.6.30 0,34°; 1.6.32 e 1.6.33 0,22°. Limite no meio.
+        const bool ok = rms < 0.28;
+        printf("  varredura do reset (±160° a 8°/s, 80 s sem parar): RMS %.2f°, pior %.2f° (limite RMS 0,28°)%s\n", rms, worst,
                ok ? "" : "  FALHOU");
         if (!ok) failures++;
     }

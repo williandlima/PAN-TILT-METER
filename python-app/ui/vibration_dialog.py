@@ -120,7 +120,11 @@ def _format_axis_summary(title: str, stats: "VibrationStats") -> str:
 
 class VibrationResultDialog(QDialog):
     def __init__(
-        self, stats: "VibrationStats", pan_stats: "VibrationStats | None" = None, parent=None
+        self,
+        stats: "VibrationStats",
+        pan_stats: "VibrationStats | None" = None,
+        parent=None,
+        on_save_csv=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Modo Vibração — Resultado da captura")
@@ -146,6 +150,14 @@ class VibrationResultDialog(QDialog):
         save_btn = QPushButton("Salvar relatório PDF...")
         save_btn.clicked.connect(self._on_save)
         layout.addWidget(save_btn)
+
+        # CSV com as amostras cruas (diagnóstico de trancos e vibração). Não
+        # fecha a janela: dá para salvar o CSV e depois o PDF.
+        if on_save_csv is not None:
+            csv_btn = QPushButton("Salvar CSV...")
+            csv_btn.setToolTip("Amostras da captura (tilt, taxa e ângulo do pan) em CSV para Excel.")
+            csv_btn.clicked.connect(on_save_csv)
+            layout.addWidget(csv_btn)
 
         close_btn = QPushButton("Fechar")
         close_btn.clicked.connect(self.accept)

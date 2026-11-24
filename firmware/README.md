@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.32`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.33`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -484,6 +484,48 @@ calibração de bancada (`calibra_tilt.py`) não mudam.
 leitura da 1.6.22; (b) movimento do tilt pela PTU: sem ultrapassagem
 visível; (c) no mastro, com a viatura ligada: mín/máx mais estreitos que
 antes. Se algo piorar, `TILT_FUSION_ENABLED = false`.
+
+### Pan: trancos do motor de passo do PTU (v1.6.33)
+
+Bancada de 24/11/2026 com a 1.6.32: a escala do pan está certa nos dois
+lados (com o tilt parado, 0 a ±60° de 10 em 10 erra no máximo 0,1-0,3°, com
+o medidor nas duas posições do suporte, o que também descarta erro do PTU).
+O que sobrava era o pan andar quando só o TILT se mexia: +0,6° numa sessão,
+−0,36° noutra. A aquisição do app (pan a cada 0,2 s) mostrou que ele só anda
+na PARTIDA e na PARADA de cada movimento do tilt, em degraus de 0,03 a 0,14°,
+e a captura do Modo Vibração mostrou o porquê: nesses instantes o motor de
+passo dá um tranco que faz a placa balançar (o acelerômetro chega a ver o
+tilt saltar 180°).
+
+- **Causa.** O pan real não se move, mas o giro oscila forte por alguns
+  décimos de segundo, e duas proteções contra leitura espúria estragavam a
+  integral justamente aí: o limitador de salto (100°/s por amostra)
+  descartava amostras reais, subamostrando a oscilação, e a mediana de 5 a
+  retificava num desvio de sinal fixo. O sinal do erro depende da fase da
+  oscilação — por isso mudava de sessão para sessão. Simulado (balanço de
+  30-180 Hz, 30-300°/s, com a posição voltando ao ponto de partida e o filtro
+  de 21 Hz do MPU): 4 trancos davam RMS 0,74° e até 4,8°.
+- **Correção (`PAN_SHOCK_*`).** Tranco = 5 das últimas 8 leituras com salto
+  entre leituras consecutivas acima de 8°/s (e abaixo de 700°/s, que é lixo).
+  Em tranco, e por 150 ms depois, o pan integra a amostra CRUA, com o
+  limitador de salto em 700°/s; ao entrar em tranco, as últimas 10 leituras
+  (inclusive as descartadas) são reintegradas cruas, porque a parte mais
+  forte do balanço é o começo, antes de o detector ter certeza. Para não
+  confundir com o lixo do barramento (o soak injeta milhares), o replay só
+  vale com assinatura de balanço (taxa oscilando, abaixo de 500°/s, correção
+  de no máximo 2,5°). Fora do tranco, nada muda.
+- **Resultado simulado.** Grade completa: RMS 0,74° → 0,17°, pior 4,8° →
+  0,89°; grade da CI (`sim/tranco_sim.cpp`): 1.6.32 RMS 1,15° e pior 4,4°
+  (falha), 1.6.33 0,19° e 0,48°. pan_sim e soak idênticos aos da 1.6.32;
+  passos curtos, torção do mastro e varredura longa preservados.
+- **Limite.** Balanço acima de ~80 Hz chega dobrado na amostragem de 100 Hz
+  (aliasing) e não tem correção sem mudar o filtro do MPU, que é o mesmo do
+  tilt — que não deve ser mexido. Na grade, 90 Hz a 300°/s ainda erra até
+  0,9°. O CSV do Modo Vibração (app 2.4.1) vai mostrar a frequência real do
+  balanço da placa na PTU.
+- **Revisão de código:** o tempo acumulado de amostras não integradas agora
+  tira a janela do teste de blocos, e o teste da varredura longa usa 30
+  sementes (com 12, o RMS saía otimista: 0,18° em vez de 0,22°).
 
 ### Pan: duas correções da revisão de código das versões 1.6.30 e 1.6.31 (v1.6.32)
 

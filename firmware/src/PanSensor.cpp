@@ -118,15 +118,52 @@ void PanSensor::update() {
         _lastAttemptMs = now;
         return;  // falha de I2C: preserva o estado em vez de corrompê-lo
     }
+    // TRANCO (1.6.33, ver PAN_SHOCK_*): a placa balançando numa ressonância
+    // mecânica (partida e parada do motor de passo do PTU) dá saltos grandes
+    // entre amostras por dezenas de amostras seguidas; um quadro de lixo do
+    // barramento dá 1 a 3. Detectado ANTES do limitador de salto, que é
+    // justamente o que ele precisa desligar.
+    // Saltos entre leituras CONSECUTIVAS (aceitas ou não), e não contra a
+    // última aceita: um quadro de lixo aceito como referência fazia as
+    // amostras boas seguintes parecerem saltos (soak, semente 40). Salto
+    // acima de PAN_SHOCK_SLEW_MAX_DPS é lixo, não balanço filtrado: não conta.
+    float readJump = 0.0f;
+    if (_hasPrevRead) {
+        readJump = fmaxf(fabsf(gyro.x - _prevReadGyro.x), fmaxf(fabsf(gyro.y - _prevReadGyro.y), fabsf(gyro.z - _prevReadGyro.z)));
+    }
+    _prevReadGyro = gyro;
+    _hasPrevRead = true;
+    if (_hasLastSample) {
+        const bool hit = readJump > PAN_SHOCK_JUMP_DPS && readJump <= PAN_SHOCK_SLEW_MAX_DPS;
+        _shockBits = static_cast<uint8_t>((_shockBits << 1) | (hit ? 1 : 0));
+        uint8_t recent = _shockBits & ((1u << PAN_SHOCK_WINDOW_SAMPLES) - 1u);
+        int hits = 0;
+        for (; recent; recent &= recent - 1) hits++;
+        if (hits >= PAN_SHOCK_MIN_HITS) {
+            _shockUntilMs = now + PAN_SHOCK_HOLD_MS;
+            _shockSamplesTotal++;
+        }
+    }
+    const bool inShock = static_cast<int32_t>(_shockUntilMs - now) > 0;
+    if (inShock && !_wasInShock) {
+        _shockReplayPending = true;  // refaz o começo do tranco (ver shockReplay())
+    }
+    _wasInShock = inShock;
+    // Registro cru para o replay (aceita OU descartada pelo limitador).
+    if (_hasLastSample && _biasReady) {
+        pushShockRec(now, gyro, up, readJump <= PAN_SHOCK_SLEW_MAX_DPS);
+    }
     // Salto impossível desde a última amostra boa (ver PAN_GYRO_SLEW_MAX_DPS):
     // quadro de lixo do barramento que passou pelo teste do acelerômetro.
     // Descartado como uma falha de leitura — nem entra na mediana, que só
     // dá conta de 2 seguidos. Depois de PAN_GYRO_SLEW_MAX_REJECTS seguidos, a
-    // referência é que está velha: aceita.
+    // referência é que está velha: aceita. Em tranco, o limite sobe: os saltos
+    // são reais, e descartá-los subamostrava a oscilação (erro líquido).
+    const float slewMax = inShock ? PAN_SHOCK_SLEW_MAX_DPS : PAN_GYRO_SLEW_MAX_DPS;
     if (_hasLastSample && now - _lastSampleMs <= 3 * ANGLE_SAMPLE_INTERVAL_MS &&
         _slewRejects < PAN_GYRO_SLEW_MAX_REJECTS &&
-        (fabsf(gyro.x - _lastGyro.x) > PAN_GYRO_SLEW_MAX_DPS || fabsf(gyro.y - _lastGyro.y) > PAN_GYRO_SLEW_MAX_DPS ||
-         fabsf(gyro.z - _lastGyro.z) > PAN_GYRO_SLEW_MAX_DPS)) {
+        (fabsf(gyro.x - _lastGyro.x) > slewMax || fabsf(gyro.y - _lastGyro.y) > slewMax ||
+         fabsf(gyro.z - _lastGyro.z) > slewMax)) {
         _slewRejects++;
         _spikeCount++;
         _failedAttempt = true;
@@ -160,6 +197,7 @@ void PanSensor::update() {
     // uma mediana confiável — nunca com uma amostra isolada, que pode ser
     // justamente a espúria.
     if (elapsedMs > 3 * ANGLE_SAMPLE_INTERVAL_MS) {
+        _shockRecCount = 0;    // buraco: o replay do tranco não atravessa
         _windowHadGap = true;  // fora do teste de blocos (PAN_ZUPT_SUB_MOTION_DPS)
         _histCount = 0;
         _hasPrevRaw = false;
@@ -168,7 +206,14 @@ void PanSensor::update() {
     const Vec3 raw = gyro;
     if (!despike(gyro, up)) {
         _pendingDtS += dtS;
+        _shockRecCount = 0;  // trecho não integrado: replay inválido
         return;
+    }
+    if (_pendingDtS > 0.0f) {
+        // Tempo acumulado de amostras que não foram integradas: cai inteiro
+        // num bloco de PAN_ZUPT_SUB_MS e não pode contar como giro
+        // concentrado (achado da revisão da 1.6.32).
+        _windowHadGap = true;
     }
     dtS += _pendingDtS;
     _pendingDtS = 0.0f;
@@ -187,7 +232,11 @@ void PanSensor::update() {
         // Regra do trapézio: a taxa muda entre duas amostras (início e fim de
         // cada giro), e multiplicar só a taxa nova pelo intervalo inteiro
         // errava até uma amostra (~0,2° a 20°/s) por borda de movimento.
-        const float rawRate = panRateDps(gyro, up);
+        // Em tranco integra a amostra CRUA: a mediana de 5 retifica uma
+        // oscilação forte num desvio de sinal fixo, que virava giro (ver
+        // PAN_SHOCK_*). Fora dele, a mediana segue descartando leituras
+        // espúrias.
+        const float rawRate = panRateDps(inShock ? raw : gyro, up);
         float rate = rawRate * panScale(up, rawRate);
         float prevRate = _hasPrevIntegRate ? _prevIntegRateDps : rate;
         _prevIntegRateDps = rate;
@@ -197,9 +246,29 @@ void PanSensor::update() {
         clampIntegrator();
         // O que foi EFETIVAMENTE aplicado (após o clamp), para o cancelamento
         // da janela desfazer exatamente isso.
-        _windowDeltaDeg += _panDeg - before;
-        _subDeltaDeg += _panDeg - before;
-        _subAbsDeg += fabsf(_panDeg - before);
+        float applied = _panDeg - before;
+        if (_shockRecCount > 0) {
+            ShockRec &last = _shockRec[(_shockRecHead + SHOCK_REC_LEN - 1) % SHOCK_REC_LEN];
+            if (last.ms == now) {
+                last.accepted = true;
+                last.applied = applied;
+            }
+        }
+        if (inShock && _shockReplayPending) {
+            _shockReplayPending = false;
+            const float corr = shockReplay();
+            if (corr != 0.0f) {
+                const float b2 = _panDeg;
+                _panDeg += corr;
+                clampIntegrator();
+                applied += _panDeg - b2;
+            }
+            // A próxima borda do trapézio parte da amostra CRUA atual.
+            _prevIntegRateDps = rate;
+        }
+        _windowDeltaDeg += applied;
+        _subDeltaDeg += applied;
+        _subAbsDeg += fabsf(applied);
         if (now - _subStartMs >= PAN_ZUPT_SUB_MS) {
             closeSubBlock();
             _subStartMs = now;
@@ -512,6 +581,71 @@ void PanSensor::closeWindow(uint32_t now) {
     }
 
     resetWindow(now);
+}
+
+void PanSensor::pushShockRec(uint32_t ms, Vec3 gyroRaw, Vec3 up, bool usable) {
+    const float r = panRateDps(gyroRaw, up);
+    _shockRec[_shockRecHead] = ShockRec{ms, r * panScale(up, r), 0.0f, false, usable};
+    _shockRecHead = (_shockRecHead + 1) % SHOCK_REC_LEN;
+    if (_shockRecCount < SHOCK_REC_LEN) _shockRecCount++;
+}
+
+float PanSensor::shockReplay() {
+    // Refaz com as amostras CRUAS o trecho guardado antes de o tranco ser
+    // reconhecido: lá a mediana e o limitador de salto já tinham estragado a
+    // integral (ver PAN_SHOCK_*). Do registro aceito mais antigo até o atual
+    // (que acabou de ser integrado): trapézio das taxas cruas, inclusive das
+    // amostras descartadas, menos o que foi efetivamente aplicado.
+    if (_shockRecCount < 2) return 0.0f;
+    const int start = (_shockRecHead + SHOCK_REC_LEN - _shockRecCount) % SHOCK_REC_LEN;
+    int first = -1;
+    for (int k = 0; k < _shockRecCount - 1; k++) {
+        const int i = (start + k) % SHOCK_REC_LEN;
+        if (_shockRec[i].accepted) { first = k; break; }
+    }
+    if (first < 0) return 0.0f;
+    float rawInt = 0.0f, appliedSum = 0.0f;
+    // Leitura com cara de lixo no trecho: não refaz nada (fica como estava).
+    for (int k = first; k < _shockRecCount; k++) {
+        if (!_shockRec[(start + k) % SHOCK_REC_LEN].usable) {
+            _shockRecCount = 0;
+            return 0.0f;
+        }
+    }
+    // Assinatura de balanço: a taxa OSCILA em torno da média do trecho (pelo
+    // menos PAN_SHOCK_MIN_SIGN_CHANGES trocas de sinal) e fica abaixo de
+    // PAN_SHOCK_MAX_RATE_DPS. Coincidências de quadros de lixo e picos (soak)
+    // imitavam o detector, com 1-3 valores soltos perto do fundo de escala.
+    float mean = 0.0f;
+    for (int k = first; k < _shockRecCount; k++) mean += _shockRec[(start + k) % SHOCK_REC_LEN].rate;
+    mean /= (_shockRecCount - first);
+    int changes = 0;
+    float prevDev = 0.0f;
+    for (int k = first; k < _shockRecCount; k++) {
+        const float r = _shockRec[(start + k) % SHOCK_REC_LEN].rate;
+        if (fabsf(r) > PAN_SHOCK_MAX_RATE_DPS) {
+            _shockRecCount = 0;
+            return 0.0f;
+        }
+        const float dev = r - mean;
+        if (prevDev != 0.0f && dev * prevDev < 0.0f) changes++;
+        if (dev != 0.0f) prevDev = dev;
+    }
+    if (changes < PAN_SHOCK_MIN_SIGN_CHANGES) {
+        _shockRecCount = 0;
+        return 0.0f;
+    }
+    for (int k = first + 1; k < _shockRecCount; k++) {
+        const ShockRec &a = _shockRec[(start + k - 1) % SHOCK_REC_LEN];
+        const ShockRec &b = _shockRec[(start + k) % SHOCK_REC_LEN];
+        rawInt += 0.5f * (a.rate + b.rate) * ((b.ms - a.ms) / 1000.0f);
+        appliedSum += b.applied;
+    }
+    _shockRecCount = 0;
+    // Correção maior que a de qualquer balanço simulado (pior 2,1° a 300°/s):
+    // não é balanço, fica como estava.
+    const float corr = rawInt - appliedSum;
+    return fabsf(corr) <= PAN_SHOCK_MAX_REPLAY_DEG ? corr : 0.0f;
 }
 
 Vec3 PanSensor::extrapolationSlope() const {
