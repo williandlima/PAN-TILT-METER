@@ -31,7 +31,7 @@ echo Baixando pacotes de requirements.txt para windows\offline_packages...
 echo (isso precisa de conexao a internet - normal so nesta etapa)
 echo.
 
-python -m pip download -r requirements.txt -d windows\offline_packages
+python -m pip download -r requirements.txt -c windows\constraints.txt -d windows\offline_packages
 if errorlevel 1 (
     echo.
     echo [ERRO] Falha ao baixar os pacotes. Verifique a conexao com a internet.

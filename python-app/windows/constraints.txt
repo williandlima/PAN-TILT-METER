@@ -1,0 +1,42 @@
+# Versões EXATAS das bibliotecas empacotadas no instalador (pip install -c).
+# Sem isto, cada build pegava a versão mais nova do dia (requirements.txt só
+# tem mínimos): o instalador 2.4.1/2.4.2 trouxe winrt-runtime 4.2.1 no lugar
+# do 4.1.0 da 2.4.0, e o "Iniciar" passou a fechar o programa (25/11/2026).
+# Este é o conjunto do instalador 2.4.0 (build de 11/11/2026), o último
+# confirmado em bancada com BLE. Para atualizar uma biblioteca, troque aqui,
+# gere o instalador e teste o "Iniciar" em BLE antes de distribuir.
+PyQt5==5.15.11
+PyQt5-Qt5==5.15.2
+PyQt5-sip==12.20.0
+bleak==3.1.0
+winrt-runtime==4.1.0
+winrt-windows-devices-bluetooth==4!10.0.28000.2957
+winrt-windows-devices-bluetooth-advertisement==4!10.0.28000.2957
+winrt-windows-devices-bluetooth-genericattributeprofile==4!10.0.28000.2957
+winrt-windows-devices-enumeration==4!10.0.28000.2957
+winrt-windows-devices-radios==4!10.0.28000.2957
+winrt-windows-foundation==4!10.0.28000.2957
+winrt-windows-foundation-collections==4!10.0.28000.2957
+winrt-windows-storage-streams==4!10.0.28000.2957
+pymodbus==3.14.0
+pyserial==3.5
+reportlab==5.1.0
+matplotlib==3.11.2
+numpy==2.4.6
+contourpy==1.3.3
+cycler==0.12.1
+fonttools==4.68.0
+kiwisolver==1.5.1
+pillow==13.0.0
+pyparsing==3.3.3
+python-dateutil==4.0.0
+packaging==26.3
+charset-normalizer==3.5.2
+typing-extensions==4.16.0
+tzdata==2026.6
+# Ferramentas do build (windows/requirements-build.txt).
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.10
+altgraph==0.17.5
+pefile==2024.8.26
+pywin32-ctypes==0.2.3

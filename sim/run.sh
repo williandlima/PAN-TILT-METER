@@ -33,6 +33,8 @@
 #                      de mín/máx, histórico (com migração de banco antigo),
 #                      resumo da aquisição, conteúdo do PDF (pdftotext) e a
 #                      aquisição com tempo programado na janela REAL (offscreen)
+#   erros_test      -> app desktop: erro num clique vai para o log e uma
+#                      mensagem, sem fechar o programa (2.4.3)
 #   conexao_test    -> indicador de conexão da janela REAL: verde só com dados
 #                      chegando da fonte em execução (sem dados, erro, leitura
 #                      atrasada após Parar, fonte antiga após reiniciar)
@@ -76,6 +78,8 @@ echo
 python3 exibicao_test.py 2>/dev/null
 echo
 python3 relatorio_test.py 2>/dev/null
+echo
+python3 erros_test.py
 echo
 python3 conexao_test.py 2>/dev/null
 echo

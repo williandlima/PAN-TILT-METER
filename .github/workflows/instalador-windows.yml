@@ -27,7 +27,9 @@ jobs:
           python-version: "3.11"
 
       - name: Dependências do app e do PyInstaller
-        run: pip install -r python-app/requirements.txt -r python-app/windows/requirements-build.txt
+        # -c: versões exatas (windows/constraints.txt) — o instalador não muda
+        # de biblioteca sozinho de um build para o outro.
+        run: pip install -r python-app/requirements.txt -r python-app/windows/requirements-build.txt -c python-app/windows/constraints.txt
 
       - name: Executável (PyInstaller)
         working-directory: python-app

@@ -86,7 +86,7 @@ python -m pip install --upgrade pip
 
 echo.
 echo Instalando dependencias do software (isso pode levar alguns minutos)...
-pip install -r requirements.txt
+pip install -r requirements.txt -c windows\constraints.txt
 if errorlevel 1 (
     echo.
     echo [ERRO] Falha ao instalar as dependencias. Verifique sua conexao
