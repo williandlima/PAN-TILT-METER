@@ -148,6 +148,22 @@ por evento, na coluna **"Medido por"**). O eixo de tempo dos gráficos conta a
 partir do início da aquisição, em s, min ou h conforme a duração. Cálculo em
 `report/acquisition.py`; testes em `sim/relatorio_test.py`.
 
+## "Iniciar" fechava o programa (app 2.4.3)
+
+- **Versões fixas no instalador.** O `requirements.txt` só tem versões
+  mínimas, e cada build do instalador pegava a versão mais nova do dia. O
+  instalador 2.4.1/2.4.2 trouxe `winrt-runtime` 4.2.1 (a biblioteca nativa do
+  Bluetooth do Windows) no lugar do 4.1.0 da 2.4.0, e o "Iniciar" passou a
+  fechar o programa. `windows/constraints.txt` fixa o conjunto exato da 2.4.0,
+  o último confirmado em bancada com BLE; o CI, o `install.bat`, o
+  `build_exe.bat` e o `build_offline_bundle.bat` usam `-c` com ele.
+- **O programa não some mais sem dizer nada.** No PyQt5, uma exceção num
+  clique aborta o processo (no .exe, a janela fecha). Agora o erro vai para
+  `%LOCALAPPDATA%\Inclinometro-2Eixos\erros.log` e aparece numa mensagem, e o
+  programa continua aberto; erros das threads de leitura e falhas nativas
+  (pilha de todas as threads, via `faulthandler`) também vão para o log.
+  Teste em `sim/erros_test.py`.
+
 ## Resolução de 0,01° na tela (app 2.4.2)
 
 O seletor de resolução de cada eixo (no cartão e em Configurações) ganhou

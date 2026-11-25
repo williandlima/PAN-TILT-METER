@@ -17,7 +17,7 @@
 ; Manter em sincronia com python-app\app_version.py (mesmos nome e versao).
 
 #define MyAppName "Inclinometro 2 Eixos (Avibras Aeroco)"
-#define MyAppVersion "2.4.2"
+#define MyAppVersion "2.4.3"
 #define MyAppPublisher "Avibras Aeroco"
 #define MyAppExeName "Inclinometro2Eixos.exe"
 

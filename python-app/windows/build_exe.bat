@@ -15,7 +15,7 @@ if not exist ".venv\Scripts\activate.bat" (
 call .venv\Scripts\activate.bat
 
 echo Instalando PyInstaller...
-pip install -r windows\requirements-build.txt
+pip install -r windows\requirements-build.txt -c windows\constraints.txt
 if errorlevel 1 (
     pause
     exit /b 1
