@@ -1,4 +1,4 @@
-"""Teste da exibição da leitura contínua (resolução de 0,25° ou 0,1° por eixo).
+"""Teste da exibição da leitura contínua (resolução de 0,25°, 0,1° ou 0,01° por eixo).
 
 Duas partes, sem hardware:
   1. a regra pura de python-app/ui/angle_display.py — degrau, histerese e
@@ -25,6 +25,8 @@ from ui.angle_display import (  # noqa: E402
     DISPLAY_STEPS_DEG,
     angle_for_display,
     format_angle,
+    short_step_label,
+    step_label,
 )
 
 failures = 0
@@ -68,7 +70,7 @@ for step in DISPLAY_STEPS_DEG:
 # os dois apps têm de mostrar exatamente os mesmos valores.
 import math  # noqa: E402
 
-for step, (e_acc, e_changes) in ((0.25, (2523.5, 107)), (0.1, (2493.6, 275))):
+for step, (e_acc, e_changes) in ((0.25, (2523.5, 107)), (0.1, (2493.6, 275)), (0.01, (2504.37, 2812))):
     shown, acc, changes = None, 0.0, 0
     for i in range(6000):
         new = angle_for_display(2.5 * math.sin(i * 0.003) + 0.37, shown, step)
@@ -82,6 +84,9 @@ for step, (e_acc, e_changes) in ((0.25, (2523.5, 107)), (0.1, (2493.6, 275))):
 check("formato 0,25°", format_angle(12.25, 0.25) == "12.25°", format_angle(12.25, 0.25))
 check("formato 0,1°", format_angle(12.3, 0.1) == "12.3°", format_angle(12.3, 0.1))
 check("formato 0,1° negativo", format_angle(-0.1, 0.1) == "-0.1°", format_angle(-0.1, 0.1))
+check("formato 0,01°", format_angle(12.34, 0.01) == "12.34°", format_angle(12.34, 0.01))
+check("formato 0,01° negativo", format_angle(-0.07, 0.01) == "-0.07°", format_angle(-0.07, 0.01))
+check("rótulos do 0,01°", short_step_label(0.01) == "0,01°" and step_label(0.01).startswith("0,01°"))
 
 print("=== janela principal (app desktop, Qt offscreen) ===")
 from PyQt5.QtCore import QSettings  # noqa: E402
@@ -118,6 +123,12 @@ pan["resolution"].setCurrentIndex(pan["resolution"].findData(0.1))
 check("pan troca para 0,1°", pan["value"].text() == "40.1°", pan["value"].text())
 pan["resolution"].setCurrentIndex(pan["resolution"].findData(0.25))
 check("pan volta para 0,25°", pan["value"].text() == "40.00°", pan["value"].text())
+
+# 0,01° (app 2.4.2): o valor sem arredondar, nos dois eixos.
+pan["resolution"].setCurrentIndex(pan["resolution"].findData(0.01))
+check("pan troca para 0,01° na hora", pan["value"].text() == "40.07°", pan["value"].text())
+check("seletor do cartão oferece 0,01°", pan["resolution"].findData(0.01) >= 0 and pan["resolution"].count() == 3)
+pan["resolution"].setCurrentIndex(pan["resolution"].findData(0.25))
 
 # Configurações > Resolução: o mesmo caminho de _open_settings() ao aceitar.
 from ui.settings_dialog import SettingsDialog, save_display_steps  # noqa: E402

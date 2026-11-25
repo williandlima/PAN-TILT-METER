@@ -18,7 +18,11 @@ from __future__ import annotations
 # eletrônico, mesa giratória). Medindo a cadeia completa, o ruído do valor
 # filtrado (~0,005°) é bem menor que meio degrau mesmo em 0,1°, então a
 # leitura também não tremula nele.
-DISPLAY_STEPS_DEG = (0.25, 0.1)
+# 0,01° (app 2.4.2) é a resolução do próprio protocolo (ângulo × 100): mostra
+# o valor sem arredondar, para diagnóstico e comparação fina. Nele o ruído do
+# valor filtrado (~0,005°) é da ordem do degrau, e o último dígito pode
+# oscilar — é o sensor, não a tela.
+DISPLAY_STEPS_DEG = (0.25, 0.1, 0.01)
 DEFAULT_DISPLAY_STEP_DEG = 0.25
 
 # Histerese, como fração do degrau: sem ela, um valor parado bem na fronteira
@@ -36,7 +40,7 @@ def normalize_step(step_deg: float) -> float:
 
 
 def display_decimals(step_deg: float) -> int:
-    """Casas decimais coerentes com o degrau: 0,25° → 2; 0,1° → 1."""
+    """Casas decimais coerentes com o degrau: 0,25° → 2; 0,1° → 1; 0,01° → 2."""
     return 1 if abs(step_deg - 0.1) < 1e-9 else 2
 
 
@@ -53,8 +57,14 @@ def format_angle(value_deg: float, step_deg: float) -> str:
 
 
 def short_step_label(step_deg: float) -> str:
-    return "0,25°" if abs(step_deg - 0.25) < 1e-9 else "0,1°"
+    if abs(step_deg - 0.25) < 1e-9:
+        return "0,25°"
+    return "0,1°" if abs(step_deg - 0.1) < 1e-9 else "0,01°"
 
 
 def step_label(step_deg: float) -> str:
-    return "0,25° (padrão)" if abs(step_deg - 0.25) < 1e-9 else "0,1° (bancada, referência de precisão)"
+    if abs(step_deg - 0.25) < 1e-9:
+        return "0,25° (padrão)"
+    if abs(step_deg - 0.1) < 1e-9:
+        return "0,1° (bancada, referência de precisão)"
+    return "0,01° (máxima, sem arredondar)"
