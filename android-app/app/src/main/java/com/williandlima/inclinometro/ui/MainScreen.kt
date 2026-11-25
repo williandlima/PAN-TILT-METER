@@ -637,9 +637,10 @@ private fun ModeSelector(
         )) {
             Spacer(Modifier.height(8.dp))
             Text(label, style = MaterialTheme.typography.bodySmall)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AngleDisplay.STEPS_DEG.forEachIndexed { i, option ->
-                    if (i > 0) Spacer(Modifier.width(16.dp))
+            // Uma opção por linha: com três (app 2.4.2) os rótulos longos não
+            // cabiam lado a lado na largura de um celular.
+            for (option in AngleDisplay.STEPS_DEG) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = current == option, onClick = { onChange(option) })
                     Text(AngleDisplay.label(option))
                 }

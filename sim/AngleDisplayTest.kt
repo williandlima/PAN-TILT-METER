@@ -32,12 +32,13 @@ fun main() {
         check("degrau $step: atraso máximo da tela", worst <= limit, "%.3f° (limite %.3f°)".format(worst, limit))
         check("degrau $step: só múltiplos do degrau", offGrid == 0, "$offGrid fora")
     }
-    check("casas decimais", AngleDisplay.decimals(0.25) == 2 && AngleDisplay.decimals(0.1) == 1)
-    check("degrau gravado inválido vira o mais próximo", AngleDisplay.normalize(0.12) == 0.1 && AngleDisplay.normalize(3.0) == 0.25)
+    check("casas decimais", AngleDisplay.decimals(0.25) == 2 && AngleDisplay.decimals(0.1) == 1 && AngleDisplay.decimals(0.01) == 2)
+    check("degrau gravado inválido vira o mais próximo", AngleDisplay.normalize(0.12) == 0.1 && AngleDisplay.normalize(3.0) == 0.25 && AngleDisplay.normalize(0.01f.toDouble()) == 0.01)
+    check("rótulos do 0,01°", AngleDisplay.shortLabel(0.01) == "0,01°" && AngleDisplay.label(0.01).startsWith("0,01°"))
 
     // Mesma varredura de sim/exibicao_test.py (sinal lento + deslocamento):
     // soma dos valores exibidos e número de trocas de degrau, por degrau.
-    val expected = mapOf(0.25 to Pair(2523.5, 107), 0.1 to Pair(2493.6, 275))
+    val expected = mapOf(0.25 to Pair(2523.5, 107), 0.1 to Pair(2493.6, 275), 0.01 to Pair(2504.37, 2812))
     for (step in AngleDisplay.STEPS_DEG) {
         var shown: Double? = null
         var acc = 0.0

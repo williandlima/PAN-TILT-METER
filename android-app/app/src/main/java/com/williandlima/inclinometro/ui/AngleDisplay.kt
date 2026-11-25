@@ -18,8 +18,11 @@ object AngleDisplay {
      * versão 1. 0,1° é para bancada, comparando com uma referência de precisão
      * (nível eletrônico, mesa giratória). O ruído do valor filtrado (~0,005°)
      * é bem menor que meio degrau mesmo em 0,1°: a leitura não tremula.
+     * 0,01° (app 2.4.2) é a resolução do próprio protocolo (ângulo × 100):
+     * mostra o valor sem arredondar; nele o último dígito pode oscilar com o
+     * ruído do sensor (~0,005°).
      */
-    val STEPS_DEG = listOf(0.25, 0.1)
+    val STEPS_DEG = listOf(0.25, 0.1, 0.01)
     const val DEFAULT_STEP_DEG = 0.25
 
     /**
@@ -34,7 +37,7 @@ object AngleDisplay {
     /** Degrau válido mais próximo (protege contra valor gravado inválido). */
     fun normalize(stepDeg: Double): Double = STEPS_DEG.minByOrNull { abs(it - stepDeg) } ?: DEFAULT_STEP_DEG
 
-    /** Casas decimais coerentes com o degrau: 0,25° → 2; 0,1° → 1. */
+    /** Casas decimais coerentes com o degrau: 0,25° → 2; 0,1° → 1; 0,01° → 2. */
     fun decimals(stepDeg: Double): Int = if (abs(stepDeg - 0.1) < 1e-9) 1 else 2
 
     /** Novo valor exibido, com histerese em relação ao atual (null = nenhum). */
@@ -47,8 +50,15 @@ object AngleDisplay {
 
     fun format(valueDeg: Double, stepDeg: Double): String = "%.${decimals(stepDeg)}f°".format(valueDeg)
 
-    fun shortLabel(stepDeg: Double): String = if (abs(stepDeg - 0.25) < 1e-9) "0,25°" else "0,1°"
+    fun shortLabel(stepDeg: Double): String = when {
+        abs(stepDeg - 0.25) < 1e-9 -> "0,25°"
+        abs(stepDeg - 0.1) < 1e-9 -> "0,1°"
+        else -> "0,01°"
+    }
 
-    fun label(stepDeg: Double): String =
-        if (abs(stepDeg - 0.25) < 1e-9) "0,25° (padrão)" else "0,1° (bancada, referência de precisão)"
+    fun label(stepDeg: Double): String = when {
+        abs(stepDeg - 0.25) < 1e-9 -> "0,25° (padrão)"
+        abs(stepDeg - 0.1) < 1e-9 -> "0,1° (bancada, referência de precisão)"
+        else -> "0,01° (máxima, sem arredondar)"
+    }
 }

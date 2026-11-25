@@ -148,6 +148,16 @@ por evento, na coluna **"Medido por"**). O eixo de tempo dos gráficos conta a
 partir do início da aquisição, em s, min ou h conforme a duração. Cálculo em
 `report/acquisition.py`; testes em `sim/relatorio_test.py`.
 
+## Resolução de 0,01° na tela (app 2.4.2)
+
+O seletor de resolução de cada eixo (no cartão e em Configurações) ganhou
+**0,01°**, além de 0,25° (padrão) e 0,1°. É a resolução do próprio protocolo
+(ângulo × 100): mostra o valor sem arredondar, para diagnóstico e comparação
+fina com uma referência. Nela o último dígito pode oscilar com o ruído do
+sensor (~0,005°). O app Android tem a mesma opção, com a mesma regra
+(`AngleDisplay.kt`). Histórico, mín/máx e relatórios não mudam: sempre usaram
+o ângulo bruto, de 0,01°.
+
 ## Modo Vibração: CSV das amostras (app 2.4.1)
 
 Na janela de resultado da captura, **Salvar CSV...** grava uma linha por

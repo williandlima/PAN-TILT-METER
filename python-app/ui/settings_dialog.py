@@ -36,7 +36,7 @@ class AppSettings:
     # Degrau de exibição de cada eixo na tela principal (ver
     # ui/angle_display.py). 0,25° é o padrão; 0,1° é para bancada, comparando
     # com uma referência de precisão (ex: nível eletrônico Mitutoyo / mesa
-    # giratória). Cada eixo tem o seu — trocar um não afeta o outro. Também
+    # giratória); 0,01° mostra o valor sem arredondar (app 2.4.2). Cada eixo tem o seu — trocar um não afeta o outro. Também
     # trocável direto no cartão de cada eixo, e lembrado entre sessões
     # (load_display_steps/save_display_steps).
     tilt_display_step_deg: float = DEFAULT_DISPLAY_STEP_DEG
