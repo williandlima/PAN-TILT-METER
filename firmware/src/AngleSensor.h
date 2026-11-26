@@ -127,13 +127,17 @@ private:
     Vec3 _gyroBias{0.0f, 0.0f, 0.0f};  // cópia do bias do PanSensor ao armar a fusão
     bool _gyroBiasValid = false;
     bool _fusionActive = false;
+    bool _accelOk = true;          // acelerômetro perto de 1 g na última leitura
+    float _lastU[3] = {0.0f, 0.0f, 1.0f};  // última vertical boa (para o giro no tranco)
+    bool _hasLastU = false;
+    uint8_t _divergeCount = 0;     // amostras seguidas com giro e acelerômetro discordando
     static constexpr int FUSION_RATE_LEN = 5;  // mediana da taxa (leituras espúrias)
     float _rateHist[FUSION_RATE_LEN] = {};
     int _rateHistCount = 0;
     // Lê acelerômetro + giro no mesmo burst. `rateDps`: taxa do ângulo bruto
     // vista pelo giro (sem bias); `gyroOk`: se ela pode ser usada.
     bool readFusionSample(float &angleDeg, float &rateDps, bool &gyroOk);
-    float fuse(float accelRawDeg, float rateDps, bool gyroOk, float dtS);
+    float fuse(float accelRawDeg, float rateDps, bool gyroOk, float dtS, bool accelOk);
 
     // Estado do filtro 1-euro (todos em ângulo absoluto, antes do offset):
     float _filteredRawDeg = 0.0f;   // saída do filtro

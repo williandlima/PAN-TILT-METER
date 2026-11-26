@@ -48,13 +48,24 @@ bool AngleSensor::readFusionSample(float &angleDeg, float &rateDps, bool &gyroOk
         _gyroBiasValid = true;
     }
     const Vec3 bias = _gyroBias;
-    // Acelerômetro longe de 1 g = aceleração linear forte: a direção dele não
-    // é a vertical agora, e ela entra na conversão da taxa abaixo.
+    // Acelerômetro longe de 1 g = aceleração linear forte (tranco do motor do
+    // PTU, pancada): a direção dele não é a vertical agora. Até a 1.6.33 a
+    // fusão desistia do giro nessas amostras e saltava para o acelerômetro
+    // sacudido; desde a 1.6.34 o giro segue sozinho, convertido com a última
+    // vertical boa (a placa não gira dezenas de graus num tranco), e o
+    // acelerômetro só volta a corrigir quando se acalma.
     const float norm = sqrtf(ax * ax + cy * cy + cz * cz);
-    if (fabsf(norm - 1.0f) > TILT_FUSION_ACCEL_TOL_G) {
+    float ux, uy, uz;
+    _accelOk = fabsf(norm - 1.0f) <= TILT_FUSION_ACCEL_TOL_G;
+    if (_accelOk) {
+        ux = ax / norm; uy = cy / norm; uz = cz / norm;
+        _lastU[0] = ux; _lastU[1] = uy; _lastU[2] = uz;
+        _hasLastU = true;
+    } else if (_hasLastU) {
+        ux = _lastU[0]; uy = _lastU[1]; uz = _lastU[2];
+    } else {
         return true;
     }
-    const float ux = ax / norm, uy = cy / norm, uz = cz / norm;
     const float den = uy * uy + uz * uz;
     if (den < 0.05f) {
         return true;  // vertical quase no eixo X: o ângulo do tilt não é definido
@@ -117,10 +128,15 @@ void AngleSensor::update() {
     // esquecida — e ainda entrava nos extremos. Até juntar 5 amostras o
     // filtro nem começa, para uma amostra ruim no boot não virar o ponto
     // de partida.
-    for (int i = 0; i < ANGLE_DESPIKE_LEN - 1; i++) {
-        _rawHist[i] = _rawHist[i + 1];
+    // Amostra com o acelerômetro sacudido (ver readFusionSample) não entra na
+    // mediana: com o giro valendo, a fusão nem usa o acelerômetro nela.
+    const bool accelOk = _accelOk || !gyroOk || !_filterReady;
+    if (accelOk) {
+        for (int i = 0; i < ANGLE_DESPIKE_LEN - 1; i++) {
+            _rawHist[i] = _rawHist[i + 1];
+        }
+        _rawHist[ANGLE_DESPIKE_LEN - 1] = rawDeg;
     }
-    _rawHist[ANGLE_DESPIKE_LEN - 1] = rawDeg;
     if (_rawHistCount < ANGLE_DESPIKE_LEN) {
         _rawHistCount++;
         return;
@@ -140,7 +156,7 @@ void AngleSensor::update() {
     if (!_filterReady) {
         // Primeira amostra entra direto: sem isso a leitura começaria em 0°
         // e levaria segundos subindo até o valor real.
-        fuse(rawDeg, 0.0f, false, 0.0f);
+        fuse(rawDeg, 0.0f, false, 0.0f, true);
         _filteredRawDeg = rawDeg;
         _measuredRawDeg = rawDeg;
         _prevRawDeg = rawDeg;
@@ -160,7 +176,7 @@ void AngleSensor::update() {
     // Fusão com o giroscópio (ver o cabeçalho de AngleSensor.h): daqui em
     // diante `rawDeg` é o ângulo fundido — os dois caminhos abaixo (tela e
     // medida) deixam de carregar a aceleração linear lida pelo acelerômetro.
-    rawDeg = fuse(rawDeg, gyroRateDps, gyroOk, dtS);
+    rawDeg = fuse(rawDeg, gyroRateDps, gyroOk, dtS, accelOk);
 
     // Filtro 1-euro (ver o bloco ANGLE_FILTER_* em Config.h). Primeiro estima
     // a velocidade angular e a suaviza; é ela que decide o quanto o filtro
@@ -171,7 +187,13 @@ void AngleSensor::update() {
 
     // Parado, a velocidade é ~0 e o corte fica em MIN_CUTOFF (bem suave).
     // Em movimento real, o termo do BETA levanta o corte e o filtro acompanha.
-    float cutoffHz = ANGLE_FILTER_MIN_CUTOFF_HZ + ANGLE_FILTER_BETA * fabsf(_filteredRateDps);
+    // Com a fusão ativa o sinal já chega com pouco ruído (o giro carrega o
+    // movimento e o acelerômetro só corrige a 1/τ), e o corte mínimo pode ser
+    // maior: com 0,02 Hz (τ = 8 s) qualquer resto ao parar — o tranco do motor
+    // do PTU — levava ~10 s para sair da tela (bancada de 26/11/2026: até
+    // 0,16° de diferença para o PRO-3600 lendo 3-5 s depois de parar).
+    const float minCutoff = _fusionActive ? TILT_DISPLAY_MIN_CUTOFF_FUSED_HZ : ANGLE_FILTER_MIN_CUTOFF_HZ;
+    float cutoffHz = minCutoff + ANGLE_FILTER_BETA * fabsf(_filteredRateDps);
     _filteredRawDeg += emaAlpha(cutoffHz, dtS) * (rawDeg - _filteredRawDeg);
 
     // Caminho de medida, em paralelo e a partir da MESMA amostra: filtro fixo
@@ -200,11 +222,25 @@ float correctedAbsDeg(float rawDeg) {
 }
 }  // namespace
 
-float AngleSensor::fuse(float accelRawDeg, float rateDps, bool gyroOk, float dtS) {
+float AngleSensor::fuse(float accelRawDeg, float rateDps, bool gyroOk, float dtS, bool accelOk) {
     const float accAbs = correctedAbsDeg(accelRawDeg);
+    // Tranco (acelerômetro sacudido, giro bom): só o giro, sem correção nem
+    // teste de divergência — o acelerômetro não é a vertical agora.
+    if (gyroOk && !accelOk && _fusionActive && dtS > 0.0f && dtS <= TILT_FUSION_MAX_DT_S) {
+        _fusedAbsDeg += (rateDps - _fusionBiasDps) * dtS;
+        return _fusedAbsDeg / tiltScaleFor(_fusedAbsDeg);
+    }
     // Sem giro utilizável, ou divergência grande demais entre os dois (bias
     // do giro errado, lixo no barramento): vale o acelerômetro, como antes.
-    const bool diverged = fabsf(accAbs - _fusedAbsDeg) > TILT_FUSION_MAX_DIVERGENCE_DEG;
+    // A divergência tem de DURAR (TILT_FUSION_DIVERGE_SAMPLES): o resto de um
+    // tranco que passou pelo teste de 1 g zerava o bias aprendido e jogava a
+    // leitura no acelerômetro sacudido.
+    if (fabsf(accAbs - _fusedAbsDeg) > TILT_FUSION_MAX_DIVERGENCE_DEG) {
+        if (_divergeCount < 255) _divergeCount++;
+    } else {
+        _divergeCount = 0;
+    }
+    const bool diverged = _divergeCount >= TILT_FUSION_DIVERGE_SAMPLES;
     if (diverged && _fusionActive) {
         _gyroBiasValid = false;  // o bias copiado não serve mais: pega outro
     }
