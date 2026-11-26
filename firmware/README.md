@@ -1,6 +1,6 @@
 # Firmware — Inclinômetro ESP32
 
-**Versão atual: `1.6.33`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
+**Versão atual: `1.6.34`** (`firmware/src/Config.h`, `FIRMWARE_VERSION`) —
 exposta em runtime tanto por Modbus (input register `REG_FIRMWARE_VERSION`)
 quanto por BLE (characteristic `CHAR_FIRMWARE_VERSION_UUID`), como inteiro
 `major*10000 + minor*100 + patch` (`FIRMWARE_VERSION_CODE`; ex: `1.0.0` →
@@ -484,6 +484,35 @@ calibração de bancada (`calibra_tilt.py`) não mudam.
 leitura da 1.6.22; (b) movimento do tilt pela PTU: sem ultrapassagem
 visível; (c) no mastro, com a viatura ligada: mín/máx mais estreitos que
 antes. Se algo piorar, `TILT_FUSION_ENABLED = false`.
+
+### Tilt: acomodação depois do tranco do motor do PTU (v1.6.34)
+
+Bancada de 26/11/2026, PAN-TILT METER contra o PRO-3600 na mesa de desempeno
+Mitutoyo 517-165, tilt de 0 a ±20° de 2 em 2°: maior diferença 0,16°, média
+0,07°, sempre um pouco ALÉM no sentido do último movimento e sem crescer com
+o ângulo (+14 a +18 exatos) — não é escala, é a leitura ainda assentando 3-5 s
+depois de parar. A aquisição de 24/11 já mostrava: ao chegar a +30°, 30,93,
+descendo até 30,0 em ~10 s. Só o tilt foi mexido; o pan não muda.
+
+- **Causa.** O tranco do motor de passo na partida e na parada sacode o
+  acelerômetro (captura de vibração: o ângulo dele salta 180°). Nessas
+  amostras ele sai da faixa de 1 g, e a fusão (1) desistia do giro e saltava
+  para o acelerômetro sacudido, e (2) uma discordância acima de 3° zerava o
+  bias aprendido. O resto ia para o filtro da tela (1-euro), que logo voltava
+  ao corte mínimo de 0,02 Hz (τ = 8 s) e o arrastava por ~10 s.
+- **Correção.** No tranco (acelerômetro fora de 1 g ± 0,15 g) o giro segue
+  sozinho, convertido com a última vertical boa, e a amostra sacudida não
+  entra na mediana; o acelerômetro volta a corrigir quando se acalma. A
+  divergência entre giro e acelerômetro só conta se durar 0,3 s
+  (`TILT_FUSION_DIVERGE_SAMPLES`). Com a fusão ativa, o corte mínimo do filtro
+  da tela é 0,1 Hz (`TILT_DISPLAY_MIN_CUTOFF_FUSED_HZ`; 0,02 Hz sem fusão,
+  como antes).
+- **Simulado** (`sim/tilt_tranco_sim.cpp`, tranco de 0,6 g e balanço de 0,5°
+  a 30 Hz): pior erro 3 s depois de parar 0,53° → 0,15°; 5 s, 0,30° → 0,04°.
+  Custo: o ruído da leitura parada sobe de ~0,003° para ~0,007° (desvio) — só
+  visível na resolução de 0,01°. Demais testes do tilt iguais ou melhores
+  (soak: pior erro do tilt 0,126° → 0,074°); pan idêntico.
+- **Na bancada:** ler 5 s depois de o PTU parar.
 
 ### Pan: trancos do motor de passo do PTU (v1.6.33)
 

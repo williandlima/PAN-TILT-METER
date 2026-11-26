@@ -36,8 +36,8 @@ constexpr float ACCEL_MAX_PLAUSIBLE_G = 2.0f;
 // (major*10000 + minor*100 + patch) para caber num único registrador
 // Modbus/characteristic BLE de 16 bits (ex: "1.0.0" -> 10000).
 // ============================================================================
-constexpr char FIRMWARE_VERSION[] = "1.6.33";
-constexpr uint16_t FIRMWARE_VERSION_CODE = 10633;
+constexpr char FIRMWARE_VERSION[] = "1.6.34";
+constexpr uint16_t FIRMWARE_VERSION_CODE = 10634;
 
 // Memória permanente (NVS) e watchdog — ver main.cpp.
 constexpr char NVS_NAMESPACE[] = "inclinometro";
@@ -260,6 +260,11 @@ constexpr float TILT_FUSION_MAX_BIAS_DPS = 5.0f;
 constexpr float TILT_FUSION_ACCEL_TOL_G = 0.15f;         // |a| fora de 1 g ± isto
 constexpr float TILT_FUSION_MAX_DIVERGENCE_DEG = 3.0f;   // giro e acelerômetro discordam
 constexpr float TILT_FUSION_MAX_DT_S = 0.1f;             // buraco de amostragem
+// Tranco do motor do PTU no tilt (1.6.34): divergência só conta se durar
+// isto (0,3 s), e com a fusão ativa o filtro da tela assenta com este corte
+// mínimo em vez de ANGLE_FILTER_MIN_CUTOFF_HZ. Ver AngleSensor::fuse().
+constexpr uint8_t TILT_FUSION_DIVERGE_SAMPLES = 30;
+constexpr float TILT_DISPLAY_MIN_CUTOFF_FUSED_HZ = 0.1f;
 
 // Sentido positivo do tilt reportado. O atan2(ay, az) cresce num sentido que
 // depende da montagem. A 1.6.17 usou -1 (na bancada com a 1.6.16 subir lia

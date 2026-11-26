@@ -5,6 +5,8 @@
 #   pan_sim         -> pan com mudanças de posição da placa e bias de fábrica
 #   tilt_sim        -> fusão giroscópio + acelerômetro no tilt (1.6.23),
 #                      lado a lado com o método só do acelerômetro
+#   tilt_tranco_sim -> tilt: acomodação depois do tranco do motor do PTU
+#                      (1.6.34)
 #   regime_sim      -> os dois regimes de uso nos dois eixos: parado por
 #                      horas e em movimento constante por 30 min
 #   vaivem_sim      -> pan: vaivém rápido de ±30° com paradas curtas e volta
@@ -56,6 +58,9 @@ g++ $FLAGS soak_sim.cpp $SRC/main.cpp $SRC/Mpu6050.cpp $SRC/BleServer.cpp $SRC/V
 echo
 g++ $FLAGS tilt_sim.cpp $SRC/AngleSensor.cpp $SRC/PanSensor.cpp $SRC/PeakHold.cpp -o "$OUT/tilt_sim"
 "$OUT/tilt_sim"
+echo
+g++ $FLAGS tilt_tranco_sim.cpp $SRC/AngleSensor.cpp $SRC/PanSensor.cpp $SRC/PeakHold.cpp -o "$OUT/tilt_tranco_sim"
+"$OUT/tilt_tranco_sim"
 echo
 g++ $FLAGS regime_sim.cpp $SRC/AngleSensor.cpp $SRC/PanSensor.cpp $SRC/PeakHold.cpp -o "$OUT/regime_sim"
 "$OUT/regime_sim"
